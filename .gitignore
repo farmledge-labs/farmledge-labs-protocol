@@ -1,18 +1,6 @@
-# Rust
-target/
-Cargo.lock
-
-# Node
-node_modules/
-dist/
-*.tsbuildinfo
-
-# Environment
+/target
+node_modules
+dist
+*.wasm
 .env
-.env.*
-!.env.example
-
-# Editor
-.vscode/
-.idea/
-*.swp
+.stellar

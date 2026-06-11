@@ -5,6 +5,9 @@ members = [
     "contracts/sesame-receipt",
 ]
 
+[workspace.dependencies]
+soroban-sdk = { version = "21.0.0" }
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true
