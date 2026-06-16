@@ -1,28 +1,28 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Address, Env, String};
+use soroban_sdk::contracterror;
 
-#[contract]
-pub struct MaizeReceiptContract;
-
-#[contractimpl]
-impl MaizeReceiptContract {
-    pub fn init(_env: Env, _admin: Address) {}
-
-    pub fn version(env: Env) -> String {
-        String::from_str(&env, "0.1.0")
-    }
+#[contracterror]
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum ContractError {
+    AlreadyInitialized = 1,
+    Unauthorized = 2,
+    TokenNotFound = 3,
+    TokenLocked = 4,
+    InvalidCommodity = 5,
+    InvalidWeight = 6,
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
-    use soroban_sdk::Env;
 
     #[test]
-    fn test_version() {
-        let env = Env::default();
-        let contract_id = env.register_contract(None, MaizeReceiptContract);
-        let client = MaizeReceiptContractClient::new(&env, &contract_id);
-        assert_eq!(client.version(), String::from_str(&env, "0.1.0"));
+    fn test_contract_error_discriminants() {
+        assert_eq!(ContractError::AlreadyInitialized as u32, 1);
+        assert_eq!(ContractError::Unauthorized as u32, 2);
+        assert_eq!(ContractError::TokenNotFound as u32, 3);
+        assert_eq!(ContractError::TokenLocked as u32, 4);
+        assert_eq!(ContractError::InvalidCommodity as u32, 5);
+        assert_eq!(ContractError::InvalidWeight as u32, 6);
     }
 }
