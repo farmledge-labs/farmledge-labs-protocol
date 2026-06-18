@@ -6,22 +6,7 @@ mod storage;
 pub use errors::ContractError;
 use storage::DataKey;
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String};
-
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct TokenMetadata {
-    pub token_id: String,
-    pub commodity: String,
-    pub grade: String,
-    pub bag_count: u32,
-    pub weight_per_bag_kg: u32,
-    pub total_weight_kg: u32,
-    pub warehouse_id: String,
-    pub custodian: Address,
-    pub deposit_ts: u64,
-    pub is_locked: bool,
-}
+use soroban_sdk::{contract, contractimpl, Address, Env, Map, String};
 
 #[contract]
 pub struct MaizeReceiptContract;
@@ -36,12 +21,37 @@ impl MaizeReceiptContract {
         env.storage().instance().set(&DataKey::TokenCounter, &0u64);
         Ok(())
     }
+
+    pub fn add_custodian(env: Env, admin: Address, custodian: Address) -> Result<(), ContractError> {
+        admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::Unauthorized)?;
+
+        if admin != stored_admin {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let mut custodians: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Custodians)
+            .unwrap_or_else(|| Map::new(&env));
+
+        custodians.set(custodian, true);
+        env.storage().instance().set(&DataKey::Custodians, &custodians);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::{testutils::Address as _, Address, Env, Map};
 
     #[test]
     fn test_init_sets_admin() {
@@ -73,6 +83,61 @@ mod tests {
                 env.storage().instance().get(&DataKey::TokenCounter).unwrap()
             });
         assert_eq!(counter, 0u64);
+    }
+
+    #[test]
+    fn test_add_custodian_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+
+        let custodians: Map<Address, bool> = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::Custodians).unwrap()
+        });
+        assert_eq!(custodians.get(custodian), Some(true));
+    }
+
+    #[test]
+    fn test_add_custodian_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        client.init(&admin);
+
+        let result = client.try_add_custodian(&non_admin, &custodian);
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+    }
+
+    #[test]
+    fn test_add_multiple_custodians() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let custodian_a = Address::generate(&env);
+        let custodian_b = Address::generate(&env);
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian_a);
+        client.add_custodian(&admin, &custodian_b);
+
+        let custodians: Map<Address, bool> = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::Custodians).unwrap()
+        });
+        assert_eq!(custodians.get(custodian_a), Some(true));
+        assert_eq!(custodians.get(custodian_b), Some(true));
     }
 
     #[test]
