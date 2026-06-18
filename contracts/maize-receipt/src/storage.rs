@@ -4,4 +4,5 @@ use soroban_sdk::contracttype;
 pub enum DataKey {
     Admin,
     TokenCounter,
+    Custodians,
 }
