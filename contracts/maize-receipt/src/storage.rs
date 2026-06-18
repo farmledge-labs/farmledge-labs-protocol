@@ -1,7 +1,7 @@
 use soroban_sdk::{contracttype, String};
 
-#[derive(Clone)]
 #[contracttype]
+#[derive(Clone)]
 pub enum DataKey {
     Admin,
     Custodians,
