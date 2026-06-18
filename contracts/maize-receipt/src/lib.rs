@@ -6,7 +6,65 @@ mod storage;
 pub use errors::ContractError;
 use storage::DataKey;
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Map, String};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Map, String};
+
+/// Derives the calendar year from a Unix timestamp (Howard Hinnant's
+/// days-from-epoch algorithm), avoiding any need for `alloc`/`chrono` in this
+/// `no_std` crate.
+fn year_from_timestamp(timestamp: u64) -> u32 {
+    let days = (timestamp / 86_400) as i64;
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    year as u32
+}
+
+fn write_padded_number(buf: &mut [u8], pos: &mut usize, mut value: u64, min_width: usize) {
+    let mut digits = [0u8; 20];
+    let mut count = 0usize;
+    if value == 0 {
+        digits[0] = b'0';
+        count = 1;
+    } else {
+        while value > 0 {
+            digits[count] = b'0' + (value % 10) as u8;
+            value /= 10;
+            count += 1;
+        }
+    }
+    for _ in count..min_width {
+        buf[*pos] = b'0';
+        *pos += 1;
+    }
+    for i in (0..count).rev() {
+        buf[*pos] = digits[i];
+        *pos += 1;
+    }
+}
+
+/// Builds a `KN-YYYY-NNNNNN` token id without `format!`, since this crate has
+/// no `alloc` support.
+fn generate_token_id(env: &Env, year: u32, counter: u64) -> String {
+    let mut buf = [0u8; 32];
+    let mut pos = 0usize;
+    buf[pos] = b'K';
+    pos += 1;
+    buf[pos] = b'N';
+    pos += 1;
+    buf[pos] = b'-';
+    pos += 1;
+    write_padded_number(&mut buf, &mut pos, year as u64, 4);
+    buf[pos] = b'-';
+    pos += 1;
+    write_padded_number(&mut buf, &mut pos, counter, 6);
+    String::from_bytes(env, &buf[..pos])
+}
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -85,6 +143,89 @@ impl MaizeReceiptContract {
         env.storage().instance().set(&DataKey::Custodians, &custodians);
 
         Ok(())
+    }
+
+    pub fn mint(
+        env: Env,
+        custodian: Address,
+        farmer_wallet: Address,
+        commodity: String,
+        grade: String,
+        bag_count: u32,
+        weight_per_bag_kg: u32,
+        warehouse_id: String,
+    ) -> Result<String, ContractError> {
+        custodian.require_auth();
+
+        let custodians: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Custodians)
+            .unwrap_or_else(|| Map::new(&env));
+
+        if !custodians.get(custodian.clone()).unwrap_or(false) {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let maize_white = String::from_str(&env, "MAIZE_WHITE");
+        let maize_yellow = String::from_str(&env, "MAIZE_YELLOW");
+        if commodity != maize_white && commodity != maize_yellow {
+            return Err(ContractError::InvalidCommodity);
+        }
+
+        if bag_count == 0 {
+            return Err(ContractError::InvalidWeight);
+        }
+
+        if weight_per_bag_kg == 0 {
+            return Err(ContractError::InvalidWeight);
+        }
+
+        let counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenCounter)
+            .unwrap_or(0)
+            + 1;
+        env.storage().instance().set(&DataKey::TokenCounter, &counter);
+
+        let year = year_from_timestamp(env.ledger().timestamp());
+        let token_id = generate_token_id(&env, year, counter);
+
+        let total_weight_kg = bag_count * weight_per_bag_kg;
+
+        let metadata = TokenMetadata {
+            token_id: token_id.clone(),
+            commodity,
+            grade,
+            bag_count,
+            weight_per_bag_kg,
+            total_weight_kg,
+            warehouse_id: warehouse_id.clone(),
+            custodian: custodian.clone(),
+            deposit_ts: env.ledger().timestamp(),
+            is_locked: false,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenMeta(token_id.clone()), &metadata);
+        env.storage()
+            .instance()
+            .set(&DataKey::Owner(token_id.clone()), &farmer_wallet);
+
+        env.events().publish(
+            (symbol_short!("Deposit"), custodian.clone()),
+            (
+                token_id.clone(),
+                farmer_wallet.clone(),
+                warehouse_id,
+                bag_count,
+                weight_per_bag_kg,
+            ),
+        );
+
+        Ok(token_id)
     }
 }
 
@@ -262,6 +403,228 @@ mod tests {
             env.storage().instance().get(&DataKey::Custodians).unwrap()
         });
         assert_eq!(custodians.get(custodian), None);
+    }
+
+    fn setup_with_custodian(env: &Env) -> (Address, Address, Address, Address) {
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(env, &contract_id);
+
+        let admin = Address::generate(env);
+        let custodian = Address::generate(env);
+        let farmer = Address::generate(env);
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+
+        (contract_id, admin, custodian, farmer)
+    }
+
+    #[test]
+    fn test_mint_rejects_unauthorized_custodian() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        let farmer = Address::generate(&env);
+        client.init(&admin);
+
+        let result = client.try_mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+    }
+
+    #[test]
+    fn test_mint_rejects_invalid_commodity() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &_contract_id);
+
+        let result = client.try_mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "WHEAT"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+        assert_eq!(result, Err(Ok(ContractError::InvalidCommodity)));
+    }
+
+    #[test]
+    fn test_mint_rejects_zero_bag_count() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let result = client.try_mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &0u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+        assert_eq!(result, Err(Ok(ContractError::InvalidWeight)));
+    }
+
+    #[test]
+    fn test_mint_rejects_zero_weight() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let result = client.try_mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &0u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+        assert_eq!(result, Err(Ok(ContractError::InvalidWeight)));
+    }
+
+    #[test]
+    fn test_mint_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        let stored: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(token_id.clone()))
+                .unwrap()
+        });
+        assert_eq!(stored.token_id, token_id);
+        assert_eq!(stored.custodian, custodian);
+        assert!(!stored.is_locked);
+
+        let owner: Address = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::Owner(token_id))
+                .unwrap()
+        });
+        assert_eq!(owner, farmer);
+    }
+
+    #[test]
+    fn test_mint_token_id_format() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        assert_eq!(token_id.len(), 14);
+        let mut buf = [0u8; 14];
+        token_id.copy_into_slice(&mut buf);
+        assert_eq!(&buf[0..3], b"KN-");
+        assert_eq!(buf[7], b'-');
+        for &b in &buf[3..7] {
+            assert!(b.is_ascii_digit());
+        }
+        for &b in &buf[8..14] {
+            assert!(b.is_ascii_digit());
+        }
+    }
+
+    #[test]
+    fn test_mint_counter_increments() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+        let counter_1: u64 = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::TokenCounter).unwrap()
+        });
+
+        client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+        let counter_2: u64 = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::TokenCounter).unwrap()
+        });
+
+        assert_eq!(counter_2, counter_1 + 1);
+    }
+
+    #[test]
+    fn test_mint_total_weight_calculated_correctly() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &7u32,
+            &63u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        let stored: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(token_id))
+                .unwrap()
+        });
+        assert_eq!(stored.total_weight_kg, 7 * 63);
     }
 
     #[test]
