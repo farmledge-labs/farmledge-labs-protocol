@@ -6,7 +6,22 @@ mod storage;
 pub use errors::ContractError;
 use storage::DataKey;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Map, String};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Map, String};
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct TokenMetadata {
+    pub token_id: String,
+    pub commodity: String,
+    pub grade: String,
+    pub bag_count: u32,
+    pub weight_per_bag_kg: u32,
+    pub total_weight_kg: u32,
+    pub warehouse_id: String,
+    pub custodian: Address,
+    pub deposit_ts: u64,
+    pub is_locked: bool,
+}
 
 #[contract]
 pub struct MaizeReceiptContract;
@@ -170,5 +185,64 @@ mod tests {
         let _ = _token_meta;
         let _ = _owner;
         let _ = _token_counter;
+    }
+
+    #[test]
+    fn test_token_metadata_fields() {
+        let env = Env::default();
+        let custodian = Address::generate(&env);
+        let metadata = TokenMetadata {
+            token_id: String::from_str(&env, "token-123"),
+            commodity: String::from_str(&env, "MAIZE_WHITE"),
+            grade: String::from_str(&env, "Grade A"),
+            bag_count: 100,
+            weight_per_bag_kg: 50,
+            total_weight_kg: 5000,
+            warehouse_id: String::from_str(&env, "warehouse-1"),
+            custodian: custodian.clone(),
+            deposit_ts: 1_700_000_000,
+            is_locked: true,
+        };
+
+        assert_eq!(metadata.token_id, String::from_str(&env, "token-123"));
+        assert_eq!(metadata.commodity, String::from_str(&env, "MAIZE_WHITE"));
+        assert_eq!(metadata.grade, String::from_str(&env, "Grade A"));
+        assert_eq!(metadata.bag_count, 100);
+        assert_eq!(metadata.weight_per_bag_kg, 50);
+        assert_eq!(metadata.total_weight_kg, 5000);
+        assert_eq!(metadata.warehouse_id, String::from_str(&env, "warehouse-1"));
+        assert_eq!(metadata.custodian, custodian);
+        assert_eq!(metadata.deposit_ts, 1_700_000_000);
+        assert!(metadata.is_locked);
+    }
+
+    #[test]
+    fn test_token_metadata_roundtrip() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let key = String::from_str(&env, "token-123");
+        let custodian = Address::generate(&env);
+        let metadata = TokenMetadata {
+            token_id: key.clone(),
+            commodity: String::from_str(&env, "MAIZE_WHITE"),
+            grade: String::from_str(&env, "Grade A"),
+            bag_count: 100,
+            weight_per_bag_kg: 50,
+            total_weight_kg: 5000,
+            warehouse_id: String::from_str(&env, "warehouse-1"),
+            custodian: custodian.clone(),
+            deposit_ts: 1_700_000_000,
+            is_locked: true,
+        };
+
+        env.as_contract(&contract_id, || {
+            env.storage().instance().set(&DataKey::TokenMeta(key.clone()), &metadata);
+        });
+
+        let stored: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::TokenMeta(key)).unwrap()
+        });
+
+        assert_eq!(stored, metadata);
     }
 }
