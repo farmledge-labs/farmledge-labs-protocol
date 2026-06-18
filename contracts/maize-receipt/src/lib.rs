@@ -6,7 +6,7 @@ mod storage;
 pub use errors::ContractError;
 use storage::DataKey;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Map};
+use soroban_sdk::{contract, contractimpl, Address, Env, Map, String};
 
 #[contract]
 pub struct MaizeReceiptContract;
@@ -154,5 +154,21 @@ mod tests {
             result,
             Err(Ok(ContractError::AlreadyInitialized))
         );
+    }
+
+    #[test]
+    fn test_datakey_variants_exist() {
+        let env = Env::default();
+        let _admin = DataKey::Admin.clone();
+        let _custodians = DataKey::Custodians.clone();
+        let _token_meta = DataKey::TokenMeta(String::from_str(&env, "token_id"));
+        let _owner = DataKey::Owner(String::from_str(&env, "token_id"));
+        let _token_counter = DataKey::TokenCounter.clone();
+
+        let _ = _admin;
+        let _ = _custodians;
+        let _ = _token_meta;
+        let _ = _owner;
+        let _ = _token_counter;
     }
 }
