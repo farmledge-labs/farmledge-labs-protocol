@@ -11,6 +11,7 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
       - run: cargo build --workspace --target wasm32-unknown-unknown --release
       - uses: actions/setup-node@v4
         with:
