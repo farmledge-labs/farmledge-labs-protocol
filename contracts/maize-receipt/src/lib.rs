@@ -267,6 +267,34 @@ impl MaizeReceiptContract {
 
         Ok(())
     }
+
+    pub fn burn(env: Env, custodian: Address, token_id: String) -> Result<(), ContractError> {
+        let metadata: TokenMetadata = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenMeta(token_id.clone()))
+            .ok_or(ContractError::TokenNotFound)?;
+
+        if metadata.custodian != custodian {
+            return Err(ContractError::Unauthorized);
+        }
+
+        custodian.require_auth();
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::TokenMeta(token_id.clone()));
+        env.storage()
+            .instance()
+            .remove(&DataKey::Owner(token_id.clone()));
+
+        env.events().publish(
+            (symbol_short!("Exit"), custodian.clone()),
+            (token_id.clone(),),
+        );
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -690,6 +718,79 @@ mod tests {
                 .unwrap()
         });
         assert_eq!(owner, farmer);
+    }
+
+    #[test]
+    fn test_burn_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        client.burn(&custodian, &token_id);
+
+        let meta_exists = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .has(&DataKey::TokenMeta(token_id.clone()))
+        });
+        let owner_exists = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .has(&DataKey::Owner(token_id.clone()))
+        });
+        assert!(!meta_exists);
+        assert!(!owner_exists);
+    }
+
+    #[test]
+    fn test_burn_wrong_custodian() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        let other_custodian = Address::generate(&env);
+        let result = client.try_burn(&other_custodian, &token_id);
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+
+        let meta_exists = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .has(&DataKey::TokenMeta(token_id))
+        });
+        assert!(meta_exists);
+    }
+
+    #[test]
+    fn test_burn_nonexistent_token() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, _farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let result = client.try_burn(&custodian, &String::from_str(&env, "KN-2024-000001"));
+        assert_eq!(result, Err(Ok(ContractError::TokenNotFound)));
     }
 
     #[test]
