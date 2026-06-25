@@ -228,6 +228,43 @@ impl MaizeReceiptContract {
         Ok(token_id)
     }
 
+    pub fn lock(env: Env, admin: Address, token_id: String) -> Result<(), ContractError> {
+        admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::Unauthorized)?;
+
+        if admin != stored_admin {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let mut metadata: TokenMetadata = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenMeta(token_id.clone()))
+            .ok_or(ContractError::TokenNotFound)?;
+
+        if metadata.is_locked {
+            return Err(ContractError::TokenLocked);
+        }
+
+        metadata.is_locked = true;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenMeta(token_id.clone()), &metadata);
+
+        env.events().publish(
+            (symbol_short!("Locked"), admin.clone()),
+            (token_id.clone(),),
+        );
+
+        Ok(())
+    }
+
     pub fn transfer(
         env: Env,
         token_id: String,
@@ -791,6 +828,79 @@ mod tests {
 
         let result = client.try_burn(&custodian, &String::from_str(&env, "KN-2024-000001"));
         assert_eq!(result, Err(Ok(ContractError::TokenNotFound)));
+    }
+
+    #[test]
+    fn test_lock_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        client.lock(&admin, &token_id);
+
+        let stored: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(token_id))
+                .unwrap()
+        });
+        assert!(stored.is_locked);
+    }
+
+    #[test]
+    fn test_lock_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        let non_admin = Address::generate(&env);
+        let result = client.try_lock(&non_admin, &token_id);
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+    }
+
+    #[test]
+    fn test_double_lock_rejected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        client.lock(&admin, &token_id);
+
+        let result = client.try_lock(&admin, &token_id);
+        assert_eq!(result, Err(Ok(ContractError::TokenLocked)));
     }
 
     #[test]
