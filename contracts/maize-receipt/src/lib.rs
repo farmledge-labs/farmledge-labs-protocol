@@ -332,6 +332,20 @@ impl MaizeReceiptContract {
 
         Ok(())
     }
+
+    // -----------------------------------------------------------------------
+    // Query functions
+    // -----------------------------------------------------------------------
+
+    pub fn query_token(
+        env: Env,
+        token_id: String,
+    ) -> Result<TokenMetadata, ContractError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::TokenMeta(token_id.clone()))
+            .ok_or(ContractError::TokenNotFound)
+    }
 }
 
 #[cfg(test)]
@@ -1084,5 +1098,52 @@ mod tests {
         });
 
         assert_eq!(stored, metadata);
+    }
+
+    #[test]
+    fn test_query_token_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        let farmer = Address::generate(&env);
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        let meta = client.query_token(&token_id);
+        assert_eq!(meta.token_id, token_id);
+        assert_eq!(meta.commodity, String::from_str(&env, "MAIZE_WHITE"));
+        assert_eq!(meta.bag_count, 10u32);
+        assert_eq!(meta.weight_per_bag_kg, 50u32);
+        assert_eq!(meta.total_weight_kg, 500u32);
+        assert_eq!(meta.custodian, custodian);
+        assert!(!meta.is_locked);
+    }
+
+    #[test]
+    fn test_query_token_not_found() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.init(&admin);
+
+        let result = client.try_query_token(&String::from_str(&env, "KN-2024-999999"));
+        assert_eq!(result, Err(Ok(ContractError::TokenNotFound)));
     }
 }
