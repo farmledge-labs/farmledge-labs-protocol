@@ -265,6 +265,39 @@ impl MaizeReceiptContract {
         Ok(())
     }
 
+    pub fn unlock(env: Env, admin: Address, token_id: String) -> Result<(), ContractError> {
+        admin.require_auth();
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::Unauthorized)?;
+
+        if admin != stored_admin {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let mut metadata: TokenMetadata = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenMeta(token_id.clone()))
+            .ok_or(ContractError::TokenNotFound)?;
+
+        metadata.is_locked = false;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenMeta(token_id.clone()), &metadata);
+
+        env.events().publish(
+            (symbol_short!("Unlocked"), admin.clone()),
+            (token_id.clone(),),
+        );
+
+        Ok(())
+    }
+
     pub fn transfer(
         env: Env,
         token_id: String,
@@ -1084,5 +1117,124 @@ mod tests {
         });
 
         assert_eq!(stored, metadata);
+    }
+
+    #[test]
+    fn test_unlock_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        // Lock the token first
+        client.lock(&admin, &token_id);
+
+        // Verify it's locked
+        let locked_metadata: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(token_id.clone()))
+                .unwrap()
+        });
+        assert!(locked_metadata.is_locked);
+
+        // Now unlock it
+        client.unlock(&admin, &token_id);
+
+        // Verify it's unlocked
+        let unlocked_metadata: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(token_id))
+                .unwrap()
+        });
+        assert!(!unlocked_metadata.is_locked);
+    }
+
+    #[test]
+    fn test_unlock_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        // Lock the token
+        client.lock(&admin, &token_id);
+
+        // Non-admin tries to unlock
+        let non_admin = Address::generate(&env);
+        let result = client.try_unlock(&non_admin, &token_id);
+
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+
+        // Verify it's still locked
+        let metadata: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(token_id))
+                .unwrap()
+        });
+        assert!(metadata.is_locked);
+    }
+
+    #[test]
+    fn test_lock_unlock_transfer_flow() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        // Lock the token
+        client.lock(&admin, &token_id);
+
+        // Verify transfer is blocked when locked
+        let buyer = Address::generate(&env);
+        let result = client.try_transfer(&token_id, &farmer, &buyer);
+        assert_eq!(result, Err(Ok(ContractError::TokenLocked)));
+
+        // Unlock the token
+        client.unlock(&admin, &token_id);
+
+        // Verify transfer succeeds after unlock
+        client.transfer(&token_id, &farmer, &buyer);
+
+        // Verify ownership changed
+        let owner: Address = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::Owner(token_id))
+                .unwrap()
+        });
+        assert_eq!(owner, buyer);
     }
 }
