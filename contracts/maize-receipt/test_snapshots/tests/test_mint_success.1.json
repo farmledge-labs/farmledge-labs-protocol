@@ -116,6 +116,22 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "AllTokens"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "string": "KN-1970-000001"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Custodians"
                             }
                           ]

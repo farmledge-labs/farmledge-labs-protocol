@@ -9,4 +9,5 @@ pub enum DataKey {
     Owner(String),
     WalletTokens(Address),
     TokenCounter,
+    AllTokens,
 }

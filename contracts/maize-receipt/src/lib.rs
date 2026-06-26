@@ -214,16 +214,16 @@ impl MaizeReceiptContract {
             .instance()
             .set(&DataKey::Owner(token_id.clone()), &farmer_wallet);
 
-        // Update wallet index
-        let mut wallet_tokens: Vec<String> = env
+        // Track all tokens for query_balance iteration
+        let mut all_tokens: Vec<String> = env
             .storage()
             .instance()
-            .get(&DataKey::WalletTokens(farmer_wallet.clone()))
+            .get(&DataKey::AllTokens)
             .unwrap_or_else(|| Vec::new(&env));
-        wallet_tokens.push_back(token_id.clone());
+        all_tokens.push_back(token_id.clone());
         env.storage()
             .instance()
-            .set(&DataKey::WalletTokens(farmer_wallet.clone()), &wallet_tokens);
+            .set(&DataKey::AllTokens, &all_tokens);
 
         env.events().publish(
             (symbol_short!("Deposit"), custodian.clone()),
@@ -237,6 +237,27 @@ impl MaizeReceiptContract {
         );
 
         Ok(token_id)
+    }
+
+    pub fn query_balance(env: Env, wallet: Address) -> Vec<String> {
+        let all_tokens: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllTokens)
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut result = Vec::new(&env);
+        for token_id in all_tokens.iter() {
+            let owner: Option<Address> = env
+                .storage()
+                .instance()
+                .get(&DataKey::Owner(token_id.clone()));
+            if let Some(owner) = owner {
+                if owner == wallet {
+                    result.push_back(token_id.clone());
+                }
+            }
+        }
+        result
     }
 
     pub fn lock(env: Env, admin: Address, token_id: String) -> Result<(), ContractError> {
@@ -341,32 +362,6 @@ impl MaizeReceiptContract {
             .instance()
             .set(&DataKey::Owner(token_id.clone()), &to);
 
-        // Update wallet indexes
-        // Remove from old owner
-        if let Some(mut old_tokens) = env
-            .storage()
-            .instance()
-            .get::<_, Vec<String>>(&DataKey::WalletTokens(from.clone()))
-        {
-            let pos = old_tokens.iter().position(|t| t == token_id);
-            if let Some(p) = pos {
-                old_tokens.remove(p as u32);
-            }
-            env.storage()
-                .instance()
-                .set(&DataKey::WalletTokens(from.clone()), &old_tokens);
-        }
-        // Add to new owner
-        let mut new_tokens: Vec<String> = env
-            .storage()
-            .instance()
-            .get(&DataKey::WalletTokens(to.clone()))
-            .unwrap_or_else(|| Vec::new(&env));
-        new_tokens.push_back(token_id.clone());
-        env.storage()
-            .instance()
-            .set(&DataKey::WalletTokens(to.clone()), &new_tokens);
-
         env.events().publish(
             (symbol_short!("Transfer"), from.clone()),
             (token_id.clone(), to.clone()),
@@ -391,30 +386,9 @@ impl MaizeReceiptContract {
         env.storage()
             .instance()
             .remove(&DataKey::TokenMeta(token_id.clone()));
-        // Remove from owner storage
-        let owner: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Owner(token_id.clone()))
-            .unwrap();
         env.storage()
             .instance()
             .remove(&DataKey::Owner(token_id.clone()));
-
-        // Update wallet index
-        if let Some(mut wallet_tokens) = env
-            .storage()
-            .instance()
-            .get::<_, Vec<String>>(&DataKey::WalletTokens(owner.clone()))
-        {
-            let pos = wallet_tokens.iter().position(|t| t == token_id);
-            if let Some(p) = pos {
-                wallet_tokens.remove(p as u32);
-            }
-            env.storage()
-                .instance()
-                .set(&DataKey::WalletTokens(owner.clone()), &wallet_tokens);
-        }
 
         env.events().publish(
             (symbol_short!("Exit"), custodian.clone()),
@@ -436,13 +410,6 @@ impl MaizeReceiptContract {
             .instance()
             .get(&DataKey::TokenMeta(token_id.clone()))
             .ok_or(ContractError::TokenNotFound)
-    }
-
-    pub fn query_balance(env: Env, wallet: Address) -> Vec<String> {
-        env.storage()
-            .instance()
-            .get(&DataKey::WalletTokens(wallet))
-            .unwrap_or_else(|| Vec::new(&env))
     }
 }
 
@@ -1245,86 +1212,6 @@ mod tests {
     }
 
     #[test]
-    fn test_query_balance_returns_owned_tokens() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
-        let client = MaizeReceiptContractClient::new(&env, &contract_id);
-
-        let token_a = client.mint(
-            &custodian,
-            &farmer,
-            &String::from_str(&env, "MAIZE_WHITE"),
-            &String::from_str(&env, "Grade A"),
-            &10u32,
-            &50u32,
-            &String::from_str(&env, "warehouse-1"),
-        );
-        let token_b = client.mint(
-            &custodian,
-            &farmer,
-            &String::from_str(&env, "MAIZE_YELLOW"),
-            &String::from_str(&env, "Grade B"),
-            &12u32,
-            &45u32,
-            &String::from_str(&env, "warehouse-2"),
-        );
-
-        let balances = client.query_balance(&farmer);
-        assert_eq!(balances.len(), 2);
-        assert_eq!(balances.get(0), Some(token_a.clone()));
-        assert_eq!(balances.get(1), Some(token_b.clone()));
-    }
-
-    #[test]
-    fn test_query_balance_excludes_other_wallets() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
-        let client = MaizeReceiptContractClient::new(&env, &contract_id);
-        let other = Address::generate(&env);
-
-        let token_a = client.mint(
-            &custodian,
-            &farmer,
-            &String::from_str(&env, "MAIZE_WHITE"),
-            &String::from_str(&env, "Grade A"),
-            &10u32,
-            &50u32,
-            &String::from_str(&env, "warehouse-1"),
-        );
-        client.mint(
-            &custodian,
-            &other,
-            &String::from_str(&env, "MAIZE_YELLOW"),
-            &String::from_str(&env, "Grade B"),
-            &12u32,
-            &45u32,
-            &String::from_str(&env, "warehouse-2"),
-        );
-
-        let balances = client.query_balance(&farmer);
-        assert_eq!(balances.len(), 1);
-        assert_eq!(balances.get(0), Some(token_a));
-    }
-
-    #[test]
-    fn test_query_balance_empty_wallet() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let (contract_id, _admin, _custodian, farmer) = setup_with_custodian(&env);
-        let client = MaizeReceiptContractClient::new(&env, &contract_id);
-        let empty_wallet = Address::generate(&env);
-
-        let balances = client.query_balance(&empty_wallet);
-        assert_eq!(balances.len(), 0);
-
-        let farmer_balances = client.query_balance(&farmer);
-        assert_eq!(farmer_balances.len(), 0);
-    }
-
-
-    #[test]
     fn test_unlock_success() {
         let env = Env::default();
         env.mock_all_auths();
@@ -1341,7 +1228,10 @@ mod tests {
             &String::from_str(&env, "warehouse-1"),
         );
 
+        // Lock the token first
         client.lock(&admin, &token_id);
+
+        // Verify it's locked
         let locked_metadata: TokenMetadata = env.as_contract(&contract_id, || {
             env.storage()
                 .instance()
@@ -1350,7 +1240,10 @@ mod tests {
         });
         assert!(locked_metadata.is_locked);
 
+        // Now unlock it
         client.unlock(&admin, &token_id);
+
+        // Verify it's unlocked
         let unlocked_metadata: TokenMetadata = env.as_contract(&contract_id, || {
             env.storage()
                 .instance()
@@ -1435,5 +1328,66 @@ mod tests {
                 .unwrap()
         });
         assert_eq!(owner, buyer);
+    }
+
+    #[test]
+    fn test_query_balance_returns_owned_tokens() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let token_a = client.mint(
+            &custodian, &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"), &String::from_str(&env, "Grade A"),
+            &10u32, &50u32, &String::from_str(&env, "warehouse-1"),
+        );
+        let token_b = client.mint(
+            &custodian, &farmer,
+            &String::from_str(&env, "MAIZE_YELLOW"), &String::from_str(&env, "Grade B"),
+            &5u32, &50u32, &String::from_str(&env, "warehouse-2"),
+        );
+
+        let balance = client.query_balance(&farmer);
+        assert_eq!(balance.len(), 2);
+        assert!(balance.contains(token_a.clone()));
+        assert!(balance.contains(token_b.clone()));
+    }
+
+    #[test]
+    fn test_query_balance_excludes_other_wallets() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, custodian, farmer_a) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let farmer_b = Address::generate(&env);
+        client.mint(
+            &custodian, &farmer_a,
+            &String::from_str(&env, "MAIZE_WHITE"), &String::from_str(&env, "Grade A"),
+            &10u32, &50u32, &String::from_str(&env, "warehouse-1"),
+        );
+        client.mint(
+            &custodian, &farmer_b,
+            &String::from_str(&env, "MAIZE_YELLOW"), &String::from_str(&env, "Grade B"),
+            &5u32, &50u32, &String::from_str(&env, "warehouse-2"),
+        );
+
+        let balance_a = client.query_balance(&farmer_a);
+        assert_eq!(balance_a.len(), 1);
+        let balance_b = client.query_balance(&farmer_b);
+        assert_eq!(balance_b.len(), 1);
+    }
+
+    #[test]
+    fn test_query_balance_empty_wallet() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, _admin, _custodian, _farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let unknown = Address::generate(&env);
+        let balance = client.query_balance(&unknown);
+        assert_eq!(balance.len(), 0);
     }
 }

@@ -169,7 +169,7 @@
                               "symbol": "Owner"
                             },
                             {
-                              "string": "SE-2026-000001"
+                              "string": "SN-1970-000001"
                             }
                           ]
                         },
@@ -184,7 +184,7 @@
                               "symbol": "Owner"
                             },
                             {
-                              "string": "SE-2026-000002"
+                              "string": "SN-1970-000002"
                             }
                           ]
                         },
@@ -211,7 +211,7 @@
                               "symbol": "TokenMeta"
                             },
                             {
-                              "string": "SE-2026-000001"
+                              "string": "SN-1970-000001"
                             }
                           ]
                         },
@@ -270,7 +270,7 @@
                                 "symbol": "token_id"
                               },
                               "val": {
-                                "string": "SE-2026-000001"
+                                "string": "SN-1970-000001"
                               }
                             },
                             {
@@ -307,7 +307,7 @@
                               "symbol": "TokenMeta"
                             },
                             {
-                              "string": "SE-2026-000002"
+                              "string": "SN-1970-000002"
                             }
                           ]
                         },
@@ -366,7 +366,7 @@
                                 "symbol": "token_id"
                               },
                               "val": {
-                                "string": "SE-2026-000002"
+                                "string": "SN-1970-000002"
                               }
                             },
                             {
@@ -682,6 +682,45 @@
       "event": {
         "ext": "v0",
         "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "Deposit"
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "string": "SN-1970-000001"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                },
+                {
+                  "string": "WH-01"
+                },
+                {
+                  "u32": 100
+                },
+                {
+                  "u32": 50
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -694,7 +733,7 @@
               }
             ],
             "data": {
-              "string": "SE-2026-000001"
+              "string": "SN-1970-000001"
             }
           }
         }
@@ -753,6 +792,45 @@
       "event": {
         "ext": "v0",
         "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "Deposit"
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "string": "SN-1970-000002"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                },
+                {
+                  "string": "WH-01"
+                },
+                {
+                  "u32": 100
+                },
+                {
+                  "u32": 50
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
         "type_": "diagnostic",
         "body": {
           "v0": {
@@ -765,7 +843,7 @@
               }
             ],
             "data": {
-              "string": "SE-2026-000002"
+              "string": "SN-1970-000002"
             }
           }
         }
