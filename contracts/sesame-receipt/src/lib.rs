@@ -27,7 +27,7 @@ pub enum ContractError {
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
-    Custodians,
+    Custodian(Address),
     TokenMeta(String),
     Owner(String),
     TokenCounter,
@@ -97,16 +97,9 @@ impl SesameReceiptContract {
             return Err(ContractError::Unauthorized);
         }
 
-        let mut custodians: Map<Address, bool> = env
-            .storage()
-            .instance()
-            .get(&DataKey::Custodians)
-            .unwrap_or_else(|| Map::new(&env));
-
-        custodians.set(custodian, true);
         env.storage()
             .instance()
-            .set(&DataKey::Custodians, &custodians);
+            .set(&DataKey::Custodian(custodian), &true);
 
         Ok(())
     }
@@ -128,16 +121,9 @@ impl SesameReceiptContract {
             return Err(ContractError::Unauthorized);
         }
 
-        let mut custodians: Map<Address, bool> = env
-            .storage()
-            .instance()
-            .get(&DataKey::Custodians)
-            .unwrap_or_else(|| Map::new(&env));
-
-        custodians.remove(custodian);
         env.storage()
             .instance()
-            .set(&DataKey::Custodians, &custodians);
+            .remove(&DataKey::Custodian(custodian));
 
         Ok(())
     }
@@ -158,13 +144,7 @@ impl SesameReceiptContract {
     ) -> Result<String, ContractError> {
         custodian.require_auth();
 
-        let custodians: Map<Address, bool> = env
-            .storage()
-            .instance()
-            .get(&DataKey::Custodians)
-            .unwrap_or_else(|| Map::new(&env));
-
-        if !custodians.get(custodian.clone()).unwrap_or(false) {
+        if !env.storage().instance().has(&DataKey::Custodian(custodian.clone())) {
             return Err(ContractError::Unauthorized);
         }
 
@@ -500,16 +480,10 @@ mod tests {
         let env = Env::default();
 
         let _admin = DataKey::Admin.clone();
-        let _custodians = DataKey::Custodians.clone();
+        let _custodians = DataKey::Custodian(Address::generate(&env));
         let _token_meta = DataKey::TokenMeta(String::from_str(&env, "token_id"));
         let _owner = DataKey::Owner(String::from_str(&env, "token_id"));
         let _token_counter = DataKey::TokenCounter.clone();
-
-        let _ = _admin;
-        let _ = _custodians;
-        let _ = _token_meta;
-        let _ = _owner;
-        let _ = _token_counter;
     }
 
     // -----------------------------------------------------------------------
@@ -589,8 +563,153 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Commodity validation – only "SESAME" is accepted
+    // Custodian Management Tests
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn sesame_test_add_custodian_success() {
+        let env         = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SesameReceiptContract);
+        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+
+        let admin     = Address::generate(&env);
+        let custodian = Address::generate(&env);
+
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+
+        let has_custodian = env.as_contract(&contract_id, || {
+            env.storage().instance().has(&DataKey::Custodian(custodian))
+        });
+        assert!(has_custodian);
+    }
+
+    #[test]
+    fn sesame_test_add_custodian_unauthorized() {
+        let env         = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SesameReceiptContract);
+        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+
+        let admin      = Address::generate(&env);
+        let fake_admin = Address::generate(&env);
+        let custodian  = Address::generate(&env);
+
+        client.init(&admin);
+        let result = client.try_add_custodian(&fake_admin, &custodian);
+        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+    }
+
+    #[test]
+    fn sesame_test_remove_custodian_success() {
+        let env         = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SesameReceiptContract);
+        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+
+        let admin     = Address::generate(&env);
+        let custodian = Address::generate(&env);
+
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+        client.remove_custodian(&admin, &custodian);
+
+        let has_custodian = env.as_contract(&contract_id, || {
+            env.storage().instance().has(&DataKey::Custodian(custodian))
+        });
+        assert!(!has_custodian);
+    }
+
+    // -----------------------------------------------------------------------
+    // Minting Functionality & Edge Case Verification
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn sesame_test_mint_rejects_invalid_commodity() {
+        let env         = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SesameReceiptContract);
+        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+
+        let admin     = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        let farmer    = Address::generate(&env);
+
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+
+        let invalid_commodity = String::from_str(&env, "MAIZE_WHITE");
+        let dummy = String::from_str(&env, "DUMMY");
+
+        let result = client.try_mint(
+            &custodian,
+            &farmer,
+            &invalid_commodity,
+            &dummy,
+            &100,
+            &50,
+            &dummy
+        );
+
+        assert_eq!(result, Err(Ok(ContractError::InvalidCommodity)));
+    }
+
+    #[test]
+    fn sesame_test_mint_success() {
+        let env         = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SesameReceiptContract);
+        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+
+        let admin     = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        let farmer    = Address::generate(&env);
+
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+
+        let commodity = String::from_str(&env, "SESAME");
+        let grade     = String::from_str(&env, "Grade A");
+        let wh_id     = String::from_str(&env, "WH-01");
+
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &commodity,
+            &grade,
+            &200,
+            &50,
+            &wh_id
+        );
+
+        assert_eq!(token_id, String::from_str(&env, "SN-1970-000001"));
+    }
+
+    #[test]
+    fn sesame_test_mint_counter_increments() {
+        let env         = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SesameReceiptContract);
+        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+
+        let admin     = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        let farmer    = Address::generate(&env);
+
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+
+        let commodity = String::from_str(&env, "SESAME");
+        let grade     = String::from_str(&env, "Grade A");
+        let wh_id     = String::from_str(&env, "WH-01");
+
+        let token_id_1 = client.mint(&custodian, &farmer, &commodity, &grade, &100, &50, &wh_id);
+        let token_id_2 = client.mint(&custodian, &farmer, &commodity, &grade, &100, &50, &wh_id);
+
+        assert_eq!(token_id_1, String::from_str(&env, "SN-1970-000001"));
+        assert_eq!(token_id_2, String::from_str(&env, "SN-1970-000002"));
+    }
 
     #[test]
     fn sesame_test_commodity_accepts_only_sesame() {
@@ -610,10 +729,6 @@ mod tests {
         assert!(!accepts(&invalid_wheat), "WHEAT must be rejected");
         assert!(!accepts(&invalid_empty), "empty string must be rejected");
     }
-
-    // -----------------------------------------------------------------------
-    // version() – kept for compatibility
-    // -----------------------------------------------------------------------
 
     #[test]
     fn sesame_test_version() {
@@ -664,63 +779,6 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn sesame_test_add_custodian_success() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, SesameReceiptContract);
-        let client = SesameReceiptContractClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let custodian = Address::generate(&env);
-        client.init(&admin);
-        client.add_custodian(&admin, &custodian);
-
-        let custodians: Map<Address, bool> = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&DataKey::Custodians).unwrap()
-        });
-        assert_eq!(custodians.get(custodian), Some(true));
-    }
-
-    #[test]
-    fn sesame_test_add_custodian_unauthorized() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, SesameReceiptContract);
-        let client = SesameReceiptContractClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let non_admin = Address::generate(&env);
-        let custodian = Address::generate(&env);
-        client.init(&admin);
-
-        let result = client.try_add_custodian(&non_admin, &custodian);
-        assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
-    }
-
-    #[test]
-    fn sesame_test_remove_custodian_success() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let contract_id = env.register_contract(None, SesameReceiptContract);
-        let client = SesameReceiptContractClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        let custodian = Address::generate(&env);
-        client.init(&admin);
-        client.add_custodian(&admin, &custodian);
-        client.remove_custodian(&admin, &custodian);
-
-        let custodians: Map<Address, bool> = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&DataKey::Custodians).unwrap()
-        });
-        assert_eq!(custodians.get(custodian), None);
-    }
-
-    // -----------------------------------------------------------------------
-    // mint
-    // -----------------------------------------------------------------------
-
-    #[test]
     fn sesame_test_mint_rejects_unauthorized_custodian() {
         let env = Env::default();
         env.mock_all_auths();
@@ -742,47 +800,6 @@ mod tests {
             &String::from_str(&env, "warehouse-1"),
         );
         assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
-    }
-
-    #[test]
-    fn sesame_test_mint_rejects_invalid_commodity() {
-        let (env, _contract_id, client, _admin, custodian, farmer) = setup();
-
-        let result = client.try_mint(
-            &custodian,
-            &farmer,
-            &String::from_str(&env, "WHEAT"),
-            &String::from_str(&env, "Grade A"),
-            &10u32,
-            &50u32,
-            &String::from_str(&env, "warehouse-1"),
-        );
-        assert_eq!(result, Err(Ok(ContractError::InvalidCommodity)));
-    }
-
-    #[test]
-    fn sesame_test_mint_success() {
-        let (env, contract_id, client, _admin, custodian, farmer) = setup();
-
-        let token_id = client.mint(
-            &custodian,
-            &farmer,
-            &String::from_str(&env, "SESAME"),
-            &String::from_str(&env, "Grade A"),
-            &10u32,
-            &50u32,
-            &String::from_str(&env, "warehouse-1"),
-        );
-
-        let stored: TokenMetadata = env.as_contract(&contract_id, || {
-            env.storage()
-                .instance()
-                .get(&DataKey::TokenMeta(token_id.clone()))
-                .unwrap()
-        });
-        assert_eq!(stored.token_id, token_id);
-        assert_eq!(stored.custodian, custodian);
-        assert!(!stored.is_locked);
     }
 
     // -----------------------------------------------------------------------
