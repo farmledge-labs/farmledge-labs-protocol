@@ -1297,4 +1297,126 @@ mod tests {
         });
         assert_eq!(owner, buyer);
     }
+
+    // -----------------------------------------------------------------------
+    // Lifecycle integration tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_mint_to_transfer_lifecycle() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        // Step 1: Init already done by setup_with_custodian — verify admin
+        let stored_admin: Address = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::Admin).unwrap()
+        });
+        assert_eq!(stored_admin, admin);
+
+        // Step 2: Custodian already added — verify custodians
+        let custodians: Map<Address, bool> = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::Custodians).unwrap()
+        });
+        assert_eq!(custodians.get(custodian.clone()), Some(true));
+
+        // Step 3: Mint token
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        let meta: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(token_id.clone()))
+                .unwrap()
+        });
+        assert_eq!(meta.bag_count, 10u32);
+        assert_eq!(meta.is_locked, false);
+
+        // Step 4: Transfer token to new owner
+        let new_owner = Address::generate(&env);
+        client.transfer(&token_id, &farmer, &new_owner);
+
+        let stored_owner: Address = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::Owner(token_id.clone())).unwrap()
+        });
+        assert_eq!(stored_owner, new_owner);
+
+        // Step 5: Token metadata still intact after transfer
+        let meta_after: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(token_id))
+                .unwrap()
+        });
+        assert_eq!(meta_after.commodity, String::from_str(&env, "MAIZE_WHITE"));
+        assert_eq!(meta_after.bag_count, 10u32);
+    }
+
+    #[test]
+    fn test_lock_unlock_burn_lifecycle() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, admin, custodian, farmer) = setup_with_custodian(&env);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        // Step 1: Init already done — verify admin
+        let stored_admin: Address = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::Admin).unwrap()
+        });
+        assert_eq!(stored_admin, admin);
+
+        // Step 2: Custodian already added — verify custodians
+        let custodians: Map<Address, bool> = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::Custodians).unwrap()
+        });
+        assert_eq!(custodians.get(custodian.clone()), Some(true));
+
+        // Step 3: Mint token
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+        assert!(!token_id.is_empty());
+
+        // Step 4: Lock token
+        client.lock(&admin, &token_id);
+
+        // Verify locked
+        let meta_locked: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(token_id.clone()))
+                .unwrap()
+        });
+        assert!(meta_locked.is_locked);
+
+        // Step 5: Transfer rejected on locked token
+        let receiver = Address::generate(&env);
+        let transfer_result = client.try_transfer(&token_id, &farmer, &receiver);
+        assert_eq!(transfer_result, Err(Ok(ContractError::TokenLocked)));
+
+        // Step 6: Burn the token
+        client.burn(&custodian, &token_id);
+
+        let meta_exists = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .has(&DataKey::TokenMeta(token_id))
+        });
+        assert!(!meta_exists);
+    }
 }
