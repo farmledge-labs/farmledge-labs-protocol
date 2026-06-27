@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 5,
+    "address": 4,
     "nonce": 0
   },
   "auth": [
@@ -43,16 +43,16 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "string": "MAIZE_WHITE"
+                  "string": "SESAME"
                 },
                 {
                   "string": "Grade A"
                 },
                 {
-                  "u32": 10
+                  "u32": 7
                 },
                 {
-                  "u32": 50
+                  "u32": 63
                 },
                 {
                   "string": "warehouse-1"
@@ -64,7 +64,6 @@
         }
       ]
     ],
-    [],
     []
   ],
   "ledger": {
@@ -116,37 +115,15 @@
                         "key": {
                           "vec": [
                             {
-                              "symbol": "AllTokens"
+                              "symbol": "Custodian"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                             }
                           ]
                         },
                         "val": {
-                          "vec": [
-                            {
-                              "string": "KN-1970-000001"
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "Custodians"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                              },
-                              "val": {
-                                "bool": true
-                              }
-                            }
-                          ]
+                          "bool": true
                         }
                       },
                       {
@@ -156,7 +133,7 @@
                               "symbol": "Owner"
                             },
                             {
-                              "string": "KN-1970-000001"
+                              "string": "SN-1970-000001"
                             }
                           ]
                         },
@@ -183,7 +160,7 @@
                               "symbol": "TokenMeta"
                             },
                             {
-                              "string": "KN-1970-000001"
+                              "string": "SN-1970-000001"
                             }
                           ]
                         },
@@ -194,7 +171,7 @@
                                 "symbol": "bag_count"
                               },
                               "val": {
-                                "u32": 10
+                                "u32": 7
                               }
                             },
                             {
@@ -202,7 +179,7 @@
                                 "symbol": "commodity"
                               },
                               "val": {
-                                "string": "MAIZE_WHITE"
+                                "string": "SESAME"
                               }
                             },
                             {
@@ -242,7 +219,7 @@
                                 "symbol": "token_id"
                               },
                               "val": {
-                                "string": "KN-1970-000001"
+                                "string": "SN-1970-000001"
                               }
                             },
                             {
@@ -250,7 +227,7 @@
                                 "symbol": "total_weight_kg"
                               },
                               "val": {
-                                "u32": 500
+                                "u32": 441
                               }
                             },
                             {
@@ -266,7 +243,7 @@
                                 "symbol": "weight_per_bag_kg"
                               },
                               "val": {
-                                "u32": 50
+                                "u32": 63
                               }
                             }
                           ]
@@ -500,16 +477,16 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "string": "MAIZE_WHITE"
+                  "string": "SESAME"
                 },
                 {
                   "string": "Grade A"
                 },
                 {
-                  "u32": 10
+                  "u32": 7
                 },
                 {
-                  "u32": 50
+                  "u32": 63
                 },
                 {
                   "string": "warehouse-1"
@@ -539,7 +516,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "KN-1970-000001"
+                  "string": "SN-1970-000001"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -548,10 +525,10 @@
                   "string": "warehouse-1"
                 },
                 {
-                  "u32": 10
+                  "u32": 7
                 },
                 {
-                  "u32": 50
+                  "u32": 63
                 }
               ]
             }
@@ -576,132 +553,7 @@
               }
             ],
             "data": {
-              "string": "KN-1970-000001"
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_call"
-              },
-              {
-                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
-              },
-              {
-                "symbol": "burn"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                },
-                {
-                  "string": "KN-1970-000001"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "fn_return"
-              },
-              {
-                "symbol": "burn"
-              }
-            ],
-            "data": {
-              "error": {
-                "contract": 2
-              }
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "contract": 2
-                }
-              }
-            ],
-            "data": {
-              "string": "escalating Ok(ScErrorType::Contract) frame-exit to Err"
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "contract": 2
-                }
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "string": "contract try_call failed"
-                },
-                {
-                  "symbol": "burn"
-                },
-                {
-                  "vec": [
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                    },
-                    {
-                      "string": "KN-1970-000001"
-                    }
-                  ]
-                }
-              ]
+              "string": "SN-1970-000001"
             }
           }
         }
