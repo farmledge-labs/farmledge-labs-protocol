@@ -6,7 +6,9 @@ mod storage;
 pub use errors::ContractError;
 use storage::DataKey;
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Map, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Env, Map, String, Vec,
+};
 
 /// Derives the calendar year from a Unix timestamp (Howard Hinnant's
 /// days-from-epoch algorithm), avoiding any need for `alloc`/`chrono` in this
@@ -79,6 +81,7 @@ pub struct TokenMetadata {
     pub custodian: Address,
     pub deposit_ts: u64,
     pub is_locked: bool,
+    pub parent_token_id: Option<String>,
 }
 
 #[contract]
@@ -95,7 +98,11 @@ impl MaizeReceiptContract {
         Ok(())
     }
 
-    pub fn add_custodian(env: Env, admin: Address, custodian: Address) -> Result<(), ContractError> {
+    pub fn add_custodian(
+        env: Env,
+        admin: Address,
+        custodian: Address,
+    ) -> Result<(), ContractError> {
         admin.require_auth();
 
         let stored_admin: Address = env
@@ -115,12 +122,18 @@ impl MaizeReceiptContract {
             .unwrap_or_else(|| Map::new(&env));
 
         custodians.set(custodian, true);
-        env.storage().instance().set(&DataKey::Custodians, &custodians);
+        env.storage()
+            .instance()
+            .set(&DataKey::Custodians, &custodians);
 
         Ok(())
     }
 
-    pub fn remove_custodian(env: Env, admin: Address, custodian: Address) -> Result<(), ContractError> {
+    pub fn remove_custodian(
+        env: Env,
+        admin: Address,
+        custodian: Address,
+    ) -> Result<(), ContractError> {
         admin.require_auth();
 
         let stored_admin: Address = env
@@ -140,7 +153,9 @@ impl MaizeReceiptContract {
             .unwrap_or_else(|| Map::new(&env));
 
         custodians.remove(custodian);
-        env.storage().instance().set(&DataKey::Custodians, &custodians);
+        env.storage()
+            .instance()
+            .set(&DataKey::Custodians, &custodians);
 
         Ok(())
     }
@@ -187,7 +202,9 @@ impl MaizeReceiptContract {
             .get(&DataKey::TokenCounter)
             .unwrap_or(0)
             + 1;
-        env.storage().instance().set(&DataKey::TokenCounter, &counter);
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenCounter, &counter);
 
         let year = year_from_timestamp(env.ledger().timestamp());
         let token_id = generate_token_id(&env, year, counter);
@@ -205,6 +222,7 @@ impl MaizeReceiptContract {
             custodian: custodian.clone(),
             deposit_ts: env.ledger().timestamp(),
             is_locked: false,
+            parent_token_id: None,
         };
 
         env.storage()
@@ -402,10 +420,118 @@ impl MaizeReceiptContract {
     // Query functions
     // -----------------------------------------------------------------------
 
-    pub fn query_token(
+    pub fn split(
         env: Env,
         token_id: String,
-    ) -> Result<TokenMetadata, ContractError> {
+        amount_kg: u32,
+    ) -> Result<(String, String), ContractError> {
+        let original: TokenMetadata = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenMeta(token_id.clone()))
+            .ok_or(ContractError::TokenNotFound)?;
+
+        if original.is_locked {
+            return Err(ContractError::TokenLocked);
+        }
+
+        if amount_kg == 0 || amount_kg >= original.total_weight_kg {
+            return Err(ContractError::InvalidWeight);
+        }
+
+        let remaining_weight = original.total_weight_kg - amount_kg;
+
+        let counter: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenCounter)
+            .unwrap_or(0)
+            + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenCounter, &counter);
+
+        let year = year_from_timestamp(env.ledger().timestamp());
+        let child_a_id = generate_token_id(&env, year, counter);
+
+        let child_b_counter = counter + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenCounter, &child_b_counter);
+        let child_b_id = generate_token_id(&env, year, child_b_counter);
+
+        let child_a_meta = TokenMetadata {
+            token_id: child_a_id.clone(),
+            commodity: original.commodity.clone(),
+            grade: original.grade.clone(),
+            bag_count: original.bag_count / 2,
+            weight_per_bag_kg: original.weight_per_bag_kg,
+            total_weight_kg: amount_kg,
+            warehouse_id: original.warehouse_id.clone(),
+            custodian: original.custodian.clone(),
+            deposit_ts: original.deposit_ts,
+            is_locked: false,
+            parent_token_id: Some(original.token_id.clone()),
+        };
+
+        let child_b_meta = TokenMetadata {
+            token_id: child_b_id.clone(),
+            commodity: original.commodity,
+            grade: original.grade,
+            bag_count: original.bag_count / 2,
+            weight_per_bag_kg: original.weight_per_bag_kg,
+            total_weight_kg: remaining_weight,
+            warehouse_id: original.warehouse_id,
+            custodian: original.custodian,
+            deposit_ts: original.deposit_ts,
+            is_locked: false,
+            parent_token_id: Some(original.token_id.clone()),
+        };
+
+        let owner: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Owner(token_id.clone()))
+            .ok_or(ContractError::TokenNotFound)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenMeta(child_a_id.clone()), &child_a_meta);
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenMeta(child_b_id.clone()), &child_b_meta);
+        env.storage()
+            .instance()
+            .set(&DataKey::Owner(child_a_id.clone()), &owner);
+        env.storage()
+            .instance()
+            .set(&DataKey::Owner(child_b_id.clone()), &owner);
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::TokenMeta(token_id.clone()));
+        env.storage().instance().remove(&DataKey::Owner(token_id));
+
+        let mut all_tokens: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllTokens)
+            .unwrap_or_else(|| Vec::new(&env));
+        all_tokens.push_back(child_a_id.clone());
+        all_tokens.push_back(child_b_id.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::AllTokens, &all_tokens);
+
+        env.events().publish(
+            (symbol_short!("Split"), owner.clone()),
+            (child_a_id.clone(), child_b_id.clone()),
+        );
+
+        Ok((child_a_id, child_b_id))
+    }
+
+    pub fn query_token(env: Env, token_id: String) -> Result<TokenMetadata, ContractError> {
         env.storage()
             .instance()
             .get(&DataKey::TokenMeta(token_id.clone()))
@@ -427,10 +553,9 @@ mod tests {
         let admin = Address::generate(&env);
         client.init(&admin);
 
-        let stored: Address = env
-            .as_contract(&contract_id, || {
-                env.storage().instance().get(&DataKey::Admin).unwrap()
-            });
+        let stored: Address = env.as_contract(&contract_id, || {
+            env.storage().instance().get(&DataKey::Admin).unwrap()
+        });
         assert_eq!(stored, admin);
     }
 
@@ -443,10 +568,12 @@ mod tests {
         let admin = Address::generate(&env);
         client.init(&admin);
 
-        let counter: u64 = env
-            .as_contract(&contract_id, || {
-                env.storage().instance().get(&DataKey::TokenCounter).unwrap()
-            });
+        let counter: u64 = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenCounter)
+                .unwrap()
+        });
         assert_eq!(counter, 0u64);
     }
 
@@ -466,6 +593,150 @@ mod tests {
             env.storage().instance().get(&DataKey::Custodians).unwrap()
         });
         assert_eq!(custodians.get(custodian), Some(true));
+    }
+
+    #[test]
+    fn test_split_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        let farmer = Address::generate(&env);
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "GRADE_A"),
+            &4,
+            &1000,
+            &String::from_str(&env, "WH1"),
+        );
+
+        let (child_a, child_b) = client.split(&token_id, &1500);
+
+        let child_a_meta: TokenMetadata = client.query_token(&child_a);
+        let child_b_meta: TokenMetadata = client.query_token(&child_b);
+
+        assert_eq!(child_a_meta.total_weight_kg, 1500);
+        assert_eq!(child_b_meta.total_weight_kg, 2500);
+        assert_eq!(child_a_meta.parent_token_id, Some(token_id.clone()));
+        assert_eq!(child_b_meta.parent_token_id, Some(token_id));
+    }
+
+    #[test]
+    fn test_split_rejects_locked_token() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        let farmer = Address::generate(&env);
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "GRADE_A"),
+            &4,
+            &1000,
+            &String::from_str(&env, "WH1"),
+        );
+        client.lock(&admin, &token_id);
+
+        let result = client.try_split(&token_id, &1500);
+        assert_eq!(result, Err(Ok(ContractError::TokenLocked)));
+    }
+
+    #[test]
+    fn test_split_rejects_amount_too_large() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        let farmer = Address::generate(&env);
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "GRADE_A"),
+            &4,
+            &1000,
+            &String::from_str(&env, "WH1"),
+        );
+
+        let result = client.try_split(&token_id, &4000);
+        assert_eq!(result, Err(Ok(ContractError::InvalidWeight)));
+    }
+
+    #[test]
+    fn test_split_rejects_zero_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        let farmer = Address::generate(&env);
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "GRADE_A"),
+            &4,
+            &1000,
+            &String::from_str(&env, "WH1"),
+        );
+
+        let result = client.try_split(&token_id, &0);
+        assert_eq!(result, Err(Ok(ContractError::InvalidWeight)));
+    }
+
+    #[test]
+    fn test_split_weight_conservation() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, MaizeReceiptContract);
+        let client = MaizeReceiptContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let custodian = Address::generate(&env);
+        let farmer = Address::generate(&env);
+        client.init(&admin);
+        client.add_custodian(&admin, &custodian);
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "GRADE_A"),
+            &4,
+            &1000,
+            &String::from_str(&env, "WH1"),
+        );
+
+        let (child_a, child_b) = client.split(&token_id, &1500);
+        let child_a_meta: TokenMetadata = client.query_token(&child_a);
+        let child_b_meta: TokenMetadata = client.query_token(&child_b);
+
+        assert_eq!(
+            child_a_meta.total_weight_kg + child_b_meta.total_weight_kg,
+            4000
+        );
     }
 
     #[test]
@@ -565,6 +836,7 @@ mod tests {
             custodian: custodian.clone(),
             deposit_ts: 1_700_000_000,
             is_locked: true,
+            parent_token_id: None,
         };
 
         env.as_contract(&contract_id, || {
@@ -814,6 +1086,7 @@ mod tests {
             custodian: metadata.custodian,
             deposit_ts: metadata.deposit_ts,
             is_locked: true,
+            parent_token_id: None,
         };
 
         env.as_contract(&contract_id, || {
@@ -891,9 +1164,7 @@ mod tests {
         assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
 
         let meta_exists = env.as_contract(&contract_id, || {
-            env.storage()
-                .instance()
-                .has(&DataKey::TokenMeta(token_id))
+            env.storage().instance().has(&DataKey::TokenMeta(token_id))
         });
         assert!(meta_exists);
     }
@@ -1029,7 +1300,10 @@ mod tests {
             &String::from_str(&env, "warehouse-1"),
         );
         let counter_1: u64 = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&DataKey::TokenCounter).unwrap()
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenCounter)
+                .unwrap()
         });
 
         client.mint(
@@ -1042,7 +1316,10 @@ mod tests {
             &String::from_str(&env, "warehouse-1"),
         );
         let counter_2: u64 = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&DataKey::TokenCounter).unwrap()
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenCounter)
+                .unwrap()
         });
 
         assert_eq!(counter_2, counter_1 + 1);
@@ -1084,10 +1361,7 @@ mod tests {
         client.init(&admin);
 
         let result = client.try_init(&admin);
-        assert_eq!(
-            result,
-            Err(Ok(ContractError::AlreadyInitialized))
-        );
+        assert_eq!(result, Err(Ok(ContractError::AlreadyInitialized)));
     }
 
     #[test]
@@ -1121,6 +1395,7 @@ mod tests {
             custodian: custodian.clone(),
             deposit_ts: 1_700_000_000,
             is_locked: true,
+            parent_token_id: None,
         };
 
         assert_eq!(metadata.token_id, String::from_str(&env, "token-123"));
@@ -1152,14 +1427,20 @@ mod tests {
             custodian: custodian.clone(),
             deposit_ts: 1_700_000_000,
             is_locked: true,
+            parent_token_id: None,
         };
 
         env.as_contract(&contract_id, || {
-            env.storage().instance().set(&DataKey::TokenMeta(key.clone()), &metadata);
+            env.storage()
+                .instance()
+                .set(&DataKey::TokenMeta(key.clone()), &metadata);
         });
 
         let stored: TokenMetadata = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&DataKey::TokenMeta(key)).unwrap()
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(key))
+                .unwrap()
         });
 
         assert_eq!(stored, metadata);
@@ -1338,14 +1619,22 @@ mod tests {
         let client = MaizeReceiptContractClient::new(&env, &contract_id);
 
         let token_a = client.mint(
-            &custodian, &farmer,
-            &String::from_str(&env, "MAIZE_WHITE"), &String::from_str(&env, "Grade A"),
-            &10u32, &50u32, &String::from_str(&env, "warehouse-1"),
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
         );
         let token_b = client.mint(
-            &custodian, &farmer,
-            &String::from_str(&env, "MAIZE_YELLOW"), &String::from_str(&env, "Grade B"),
-            &5u32, &50u32, &String::from_str(&env, "warehouse-2"),
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "MAIZE_YELLOW"),
+            &String::from_str(&env, "Grade B"),
+            &5u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-2"),
         );
 
         let balance = client.query_balance(&farmer);
@@ -1363,14 +1652,22 @@ mod tests {
 
         let farmer_b = Address::generate(&env);
         client.mint(
-            &custodian, &farmer_a,
-            &String::from_str(&env, "MAIZE_WHITE"), &String::from_str(&env, "Grade A"),
-            &10u32, &50u32, &String::from_str(&env, "warehouse-1"),
+            &custodian,
+            &farmer_a,
+            &String::from_str(&env, "MAIZE_WHITE"),
+            &String::from_str(&env, "Grade A"),
+            &10u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-1"),
         );
         client.mint(
-            &custodian, &farmer_b,
-            &String::from_str(&env, "MAIZE_YELLOW"), &String::from_str(&env, "Grade B"),
-            &5u32, &50u32, &String::from_str(&env, "warehouse-2"),
+            &custodian,
+            &farmer_b,
+            &String::from_str(&env, "MAIZE_YELLOW"),
+            &String::from_str(&env, "Grade B"),
+            &5u32,
+            &50u32,
+            &String::from_str(&env, "warehouse-2"),
         );
 
         let balance_a = client.query_balance(&farmer_a);
@@ -1388,7 +1685,8 @@ mod tests {
 
         let unknown = Address::generate(&env);
         let balance = client.query_balance(&unknown);
-        assert_eq!(balance.len(), 0);}
+        assert_eq!(balance.len(), 0);
+    }
     // -----------------------------------------------------------------------
     // Lifecycle integration tests
     // -----------------------------------------------------------------------
@@ -1437,7 +1735,10 @@ mod tests {
         client.transfer(&token_id, &farmer, &new_owner);
 
         let stored_owner: Address = env.as_contract(&contract_id, || {
-            env.storage().instance().get(&DataKey::Owner(token_id.clone())).unwrap()
+            env.storage()
+                .instance()
+                .get(&DataKey::Owner(token_id.clone()))
+                .unwrap()
         });
         assert_eq!(stored_owner, new_owner);
 
@@ -1504,9 +1805,7 @@ mod tests {
         client.burn(&custodian, &token_id);
 
         let meta_exists = env.as_contract(&contract_id, || {
-            env.storage()
-                .instance()
-                .has(&DataKey::TokenMeta(token_id))
+            env.storage().instance().has(&DataKey::TokenMeta(token_id))
         });
         assert!(!meta_exists);
     }
