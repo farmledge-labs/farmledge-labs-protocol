@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracterror, contracttype, symbol_short, Address, Env, String,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String,
 };
 
 // ---------------------------------------------------------------------------
@@ -144,7 +144,11 @@ impl SesameReceiptContract {
     ) -> Result<String, ContractError> {
         custodian.require_auth();
 
-        if !env.storage().instance().has(&DataKey::Custodian(custodian.clone())) {
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::Custodian(custodian.clone()))
+        {
             return Err(ContractError::Unauthorized);
         }
 
@@ -368,10 +372,7 @@ impl SesameReceiptContract {
     // Query functions
     // -----------------------------------------------------------------------
 
-    pub fn get_token_metadata(
-        env: Env,
-        token_id: String,
-    ) -> Result<TokenMetadata, ContractError> {
+    pub fn get_token_metadata(env: Env, token_id: String) -> Result<TokenMetadata, ContractError> {
         env.storage()
             .instance()
             .get(&DataKey::TokenMeta(token_id.clone()))
@@ -568,12 +569,12 @@ mod tests {
 
     #[test]
     fn sesame_test_add_custodian_success() {
-        let env         = Env::default();
+        let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SesameReceiptContract);
-        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+        let client = SesameReceiptContractClient::new(&env, &contract_id);
 
-        let admin     = Address::generate(&env);
+        let admin = Address::generate(&env);
         let custodian = Address::generate(&env);
 
         client.init(&admin);
@@ -587,14 +588,14 @@ mod tests {
 
     #[test]
     fn sesame_test_add_custodian_unauthorized() {
-        let env         = Env::default();
+        let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SesameReceiptContract);
-        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+        let client = SesameReceiptContractClient::new(&env, &contract_id);
 
-        let admin      = Address::generate(&env);
+        let admin = Address::generate(&env);
         let fake_admin = Address::generate(&env);
-        let custodian  = Address::generate(&env);
+        let custodian = Address::generate(&env);
 
         client.init(&admin);
         let result = client.try_add_custodian(&fake_admin, &custodian);
@@ -603,12 +604,12 @@ mod tests {
 
     #[test]
     fn sesame_test_remove_custodian_success() {
-        let env         = Env::default();
+        let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SesameReceiptContract);
-        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+        let client = SesameReceiptContractClient::new(&env, &contract_id);
 
-        let admin     = Address::generate(&env);
+        let admin = Address::generate(&env);
         let custodian = Address::generate(&env);
 
         client.init(&admin);
@@ -627,14 +628,14 @@ mod tests {
 
     #[test]
     fn sesame_test_mint_rejects_invalid_commodity() {
-        let env         = Env::default();
+        let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SesameReceiptContract);
-        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+        let client = SesameReceiptContractClient::new(&env, &contract_id);
 
-        let admin     = Address::generate(&env);
+        let admin = Address::generate(&env);
         let custodian = Address::generate(&env);
-        let farmer    = Address::generate(&env);
+        let farmer = Address::generate(&env);
 
         client.init(&admin);
         client.add_custodian(&admin, &custodian);
@@ -649,7 +650,7 @@ mod tests {
             &dummy,
             &100,
             &50,
-            &dummy
+            &dummy,
         );
 
         assert_eq!(result, Err(Ok(ContractError::InvalidCommodity)));
@@ -657,52 +658,44 @@ mod tests {
 
     #[test]
     fn sesame_test_mint_success() {
-        let env         = Env::default();
+        let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SesameReceiptContract);
-        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+        let client = SesameReceiptContractClient::new(&env, &contract_id);
 
-        let admin     = Address::generate(&env);
+        let admin = Address::generate(&env);
         let custodian = Address::generate(&env);
-        let farmer    = Address::generate(&env);
+        let farmer = Address::generate(&env);
 
         client.init(&admin);
         client.add_custodian(&admin, &custodian);
 
         let commodity = String::from_str(&env, "SESAME");
-        let grade     = String::from_str(&env, "Grade A");
-        let wh_id     = String::from_str(&env, "WH-01");
+        let grade = String::from_str(&env, "Grade A");
+        let wh_id = String::from_str(&env, "WH-01");
 
-        let token_id = client.mint(
-            &custodian,
-            &farmer,
-            &commodity,
-            &grade,
-            &200,
-            &50,
-            &wh_id
-        );
+        let token_id = client.mint(&custodian, &farmer, &commodity, &grade, &200, &50, &wh_id);
 
         assert_eq!(token_id, String::from_str(&env, "SN-1970-000001"));
     }
 
     #[test]
     fn sesame_test_mint_counter_increments() {
-        let env         = Env::default();
+        let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SesameReceiptContract);
-        let client      = SesameReceiptContractClient::new(&env, &contract_id);
+        let client = SesameReceiptContractClient::new(&env, &contract_id);
 
-        let admin     = Address::generate(&env);
+        let admin = Address::generate(&env);
         let custodian = Address::generate(&env);
-        let farmer    = Address::generate(&env);
+        let farmer = Address::generate(&env);
 
         client.init(&admin);
         client.add_custodian(&admin, &custodian);
 
         let commodity = String::from_str(&env, "SESAME");
-        let grade     = String::from_str(&env, "Grade A");
-        let wh_id     = String::from_str(&env, "WH-01");
+        let grade = String::from_str(&env, "Grade A");
+        let wh_id = String::from_str(&env, "WH-01");
 
         let token_id_1 = client.mint(&custodian, &farmer, &commodity, &grade, &100, &50, &wh_id);
         let token_id_2 = client.mint(&custodian, &farmer, &commodity, &grade, &100, &50, &wh_id);
@@ -724,8 +717,14 @@ mod tests {
         let accepts = |c: &String| -> bool { *c == valid };
 
         assert!(accepts(&valid), "SESAME must be accepted");
-        assert!(!accepts(&invalid_maize_white), "MAIZE_WHITE must be rejected");
-        assert!(!accepts(&invalid_maize_yellow), "MAIZE_YELLOW must be rejected");
+        assert!(
+            !accepts(&invalid_maize_white),
+            "MAIZE_WHITE must be rejected"
+        );
+        assert!(
+            !accepts(&invalid_maize_yellow),
+            "MAIZE_YELLOW must be rejected"
+        );
         assert!(!accepts(&invalid_wheat), "WHEAT must be rejected");
         assert!(!accepts(&invalid_empty), "empty string must be rejected");
     }
@@ -742,7 +741,14 @@ mod tests {
     // Helper: setup a test contract with admin + custodian
     // -----------------------------------------------------------------------
 
-    fn setup() -> (Env, Address, SesameReceiptContractClient<'static>, Address, Address, Address) {
+    fn setup() -> (
+        Env,
+        Address,
+        SesameReceiptContractClient<'static>,
+        Address,
+        Address,
+        Address,
+    ) {
         let env = Env::default();
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SesameReceiptContract);
@@ -863,9 +869,7 @@ mod tests {
                 .has(&DataKey::TokenMeta(token_id.clone()))
         });
         let owner_exists = env.as_contract(&contract_id, || {
-            env.storage()
-                .instance()
-                .has(&DataKey::Owner(token_id))
+            env.storage().instance().has(&DataKey::Owner(token_id))
         });
         assert!(!meta_exists);
         assert!(!owner_exists);
