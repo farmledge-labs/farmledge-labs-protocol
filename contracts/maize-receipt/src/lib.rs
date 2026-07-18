@@ -192,7 +192,9 @@ impl MaizeReceiptContract {
         let year = year_from_timestamp(env.ledger().timestamp());
         let token_id = generate_token_id(&env, year, counter);
 
-        let total_weight_kg = bag_count * weight_per_bag_kg;
+        let total_weight_kg = bag_count
+            .checked_mul(weight_per_bag_kg)
+            .ok_or(ContractError::InvalidWeight)?;
 
         let metadata = TokenMetadata {
             token_id: token_id.clone(),
@@ -316,6 +318,10 @@ impl MaizeReceiptContract {
             .get(&DataKey::TokenMeta(token_id.clone()))
             .ok_or(ContractError::TokenNotFound)?;
 
+        if !metadata.is_locked {
+            return Err(ContractError::TokenLocked);
+        }
+
         metadata.is_locked = false;
 
         env.storage()
@@ -376,6 +382,10 @@ impl MaizeReceiptContract {
             .instance()
             .get(&DataKey::TokenMeta(token_id.clone()))
             .ok_or(ContractError::TokenNotFound)?;
+
+        if metadata.is_locked {
+            return Err(ContractError::TokenLocked);
+        }
 
         if metadata.custodian != custodian {
             return Err(ContractError::Unauthorized);
