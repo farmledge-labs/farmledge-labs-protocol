@@ -263,6 +263,12 @@
                             },
                             {
                               "key": {
+                                "symbol": "parent_token_id"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
                                 "symbol": "token_id"
                               },
                               "val": {

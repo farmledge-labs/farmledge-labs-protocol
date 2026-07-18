@@ -293,6 +293,12 @@
                             },
                             {
                               "key": {
+                                "symbol": "parent_token_id"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
                                 "symbol": "token_id"
                               },
                               "val": {
@@ -386,6 +392,12 @@
                               "val": {
                                 "bool": false
                               }
+                            },
+                            {
+                              "key": {
+                                "symbol": "parent_token_id"
+                              },
+                              "val": "void"
                             },
                             {
                               "key": {
