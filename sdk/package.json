@@ -11,13 +11,16 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "roots": ["<rootDir>/tests"]
+    "roots": [
+      "<rootDir>/tests"
+    ]
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^12.0.0"
+    "@stellar/stellar-sdk": "^12.0.0",
+    "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
