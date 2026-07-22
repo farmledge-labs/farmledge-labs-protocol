@@ -31,3 +31,12 @@ export interface BurnParams {
 export interface QueryParams {
   tokenId: string;
 }
+
+export interface TokenRecord {
+  tokenId: string;
+  receipt: WarehouseReceipt;
+  owner: string;
+  mintedAt?: number;
+  metadataUri?: string;
+}
+
