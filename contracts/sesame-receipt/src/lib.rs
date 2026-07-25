@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, String, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -31,6 +31,7 @@ pub enum DataKey {
     TokenMeta(String),
     Owner(String),
     TokenCounter,
+    AllTokens,
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,7 @@ pub struct TokenMetadata {
     pub custodian: Address,
     pub deposit_ts: u64,
     pub is_locked: bool,
+    pub parent_token_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +195,7 @@ impl SesameReceiptContract {
             custodian: custodian.clone(),
             deposit_ts: env.ledger().timestamp(),
             is_locked: false,
+            parent_token_id: None,
         };
 
         env.storage()
@@ -201,6 +204,17 @@ impl SesameReceiptContract {
         env.storage()
             .instance()
             .set(&DataKey::Owner(token_id.clone()), &farmer_wallet);
+
+        // Track all tokens for split() iteration
+        let mut all_tokens: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllTokens)
+            .unwrap_or_else(|| Vec::new(&env));
+        all_tokens.push_back(token_id.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::AllTokens, &all_tokens);
 
         env.events().publish(
             (symbol_short!("Deposit"), custodian.clone()),
@@ -375,6 +389,131 @@ impl SesameReceiptContract {
     }
 
     // -----------------------------------------------------------------------
+    // Split
+    // -----------------------------------------------------------------------
+
+    /// Burns `token_id` and mints two children whose weights sum to the
+    /// original `total_weight_kg`. Child A carries `amount_kg`; child B
+    /// carries the remainder. Both children record `parent_token_id`.
+    pub fn split(
+        env: Env,
+        token_id: String,
+        amount_kg: u32,
+    ) -> Result<(String, String), ContractError> {
+        let original: TokenMetadata = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenMeta(token_id.clone()))
+            .ok_or(ContractError::TokenNotFound)?;
+
+        if original.is_locked {
+            return Err(ContractError::TokenLocked);
+        }
+
+        if amount_kg == 0 || amount_kg >= original.total_weight_kg {
+            return Err(ContractError::InvalidWeight);
+        }
+
+        let remaining_weight = original.total_weight_kg - amount_kg;
+
+        // Mint child A
+        let counter_a: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenCounter)
+            .unwrap_or(0)
+            + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenCounter, &counter_a);
+
+        let year = year_from_timestamp(env.ledger().timestamp());
+        let child_a_id = generate_token_id(&env, year, counter_a);
+
+        // Mint child B
+        let counter_b = counter_a + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenCounter, &counter_b);
+        let child_b_id = generate_token_id(&env, year, counter_b);
+
+        let child_a_meta = TokenMetadata {
+            token_id: child_a_id.clone(),
+            commodity: original.commodity.clone(),
+            grade: original.grade.clone(),
+            bag_count: original.bag_count / 2,
+            weight_per_bag_kg: original.weight_per_bag_kg,
+            total_weight_kg: amount_kg,
+            warehouse_id: original.warehouse_id.clone(),
+            custodian: original.custodian.clone(),
+            deposit_ts: original.deposit_ts,
+            is_locked: false,
+            parent_token_id: Some(original.token_id.clone()),
+        };
+
+        let child_b_meta = TokenMetadata {
+            token_id: child_b_id.clone(),
+            commodity: original.commodity,
+            grade: original.grade,
+            bag_count: original.bag_count / 2,
+            weight_per_bag_kg: original.weight_per_bag_kg,
+            total_weight_kg: remaining_weight,
+            warehouse_id: original.warehouse_id,
+            custodian: original.custodian,
+            deposit_ts: original.deposit_ts,
+            is_locked: false,
+            parent_token_id: Some(original.token_id.clone()),
+        };
+
+        let owner: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Owner(token_id.clone()))
+            .ok_or(ContractError::TokenNotFound)?;
+
+        // Store children
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenMeta(child_a_id.clone()), &child_a_meta);
+        env.storage()
+            .instance()
+            .set(&DataKey::TokenMeta(child_b_id.clone()), &child_b_meta);
+        env.storage()
+            .instance()
+            .set(&DataKey::Owner(child_a_id.clone()), &owner);
+        env.storage()
+            .instance()
+            .set(&DataKey::Owner(child_b_id.clone()), &owner);
+
+        // Burn the original token
+        env.storage()
+            .instance()
+            .remove(&DataKey::TokenMeta(token_id.clone()));
+        env.storage()
+            .instance()
+            .remove(&DataKey::Owner(token_id));
+
+        // Update AllTokens list: append children
+        let mut all_tokens: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllTokens)
+            .unwrap_or_else(|| Vec::new(&env));
+        all_tokens.push_back(child_a_id.clone());
+        all_tokens.push_back(child_b_id.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::AllTokens, &all_tokens);
+
+        env.events().publish(
+            (symbol_short!("Split"), owner.clone()),
+            (child_a_id.clone(), child_b_id.clone()),
+        );
+
+        Ok((child_a_id, child_b_id))
+    }
+
+    // -----------------------------------------------------------------------
     // Query functions
     // -----------------------------------------------------------------------
 
@@ -462,7 +601,7 @@ fn generate_token_id(env: &Env, year: u32, counter: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env, Map};
+    use soroban_sdk::{testutils::Address as _, Address, Env};
 
     // -----------------------------------------------------------------------
     // ContractError discriminants
@@ -515,6 +654,7 @@ mod tests {
             custodian: custodian.clone(),
             deposit_ts: 1_700_000_000,
             is_locked: true,
+            parent_token_id: None,
         };
 
         env.as_contract(&contract_id, || {
@@ -1022,7 +1162,7 @@ mod tests {
 
     #[test]
     fn sesame_test_token_id_format() {
-        let (env, contract_id, client, _admin, custodian, farmer) = setup();
+        let (env, _contract_id, client, _admin, custodian, farmer) = setup();
         let token_id = mint_token(&env, &client, &custodian, &farmer);
 
         assert_eq!(token_id.len(), 14);
@@ -1089,5 +1229,81 @@ mod tests {
                 .unwrap()
         });
         assert_eq!(stored.total_weight_kg, 7 * 63);
+    }
+
+    // -----------------------------------------------------------------------
+    // split() tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn sesame_test_split_success() {
+        let (env, _contract_id, client, _admin, custodian, farmer) = setup();
+
+        // Mint a 500 kg token (10 bags × 50 kg)
+        let token_id = mint_token(&env, &client, &custodian, &farmer);
+
+        let (child_a, child_b) = client.split(&token_id, &200);
+
+        let meta_a = client.get_token_metadata(&child_a);
+        let meta_b = client.get_token_metadata(&child_b);
+
+        assert_eq!(meta_a.total_weight_kg, 200);
+        assert_eq!(meta_b.total_weight_kg, 300);
+        assert_eq!(meta_a.parent_token_id, Some(token_id.clone()));
+        assert_eq!(meta_b.parent_token_id, Some(token_id));
+    }
+
+    #[test]
+    fn sesame_test_split_rejects_locked_token() {
+        let (env, _contract_id, client, admin, custodian, farmer) = setup();
+        let token_id = mint_token(&env, &client, &custodian, &farmer);
+        client.lock(&admin, &token_id);
+
+        let result = client.try_split(&token_id, &200);
+        assert_eq!(result, Err(Ok(ContractError::TokenLocked)));
+    }
+
+    #[test]
+    fn sesame_test_split_rejects_amount_too_large() {
+        let (env, _contract_id, client, _admin, custodian, farmer) = setup();
+        // Minted token has 500 kg (10 × 50)
+        let token_id = mint_token(&env, &client, &custodian, &farmer);
+
+        // amount_kg == total_weight_kg should be rejected
+        let result = client.try_split(&token_id, &500);
+        assert_eq!(result, Err(Ok(ContractError::InvalidWeight)));
+    }
+
+    #[test]
+    fn sesame_test_split_rejects_zero_amount() {
+        let (env, _contract_id, client, _admin, custodian, farmer) = setup();
+        let token_id = mint_token(&env, &client, &custodian, &farmer);
+
+        let result = client.try_split(&token_id, &0);
+        assert_eq!(result, Err(Ok(ContractError::InvalidWeight)));
+    }
+
+    #[test]
+    fn sesame_test_split_weight_conservation() {
+        let (env, _contract_id, client, _admin, custodian, farmer) = setup();
+        // Mint 630 kg token (7 bags × 90 kg)
+        let token_id = client.mint(
+            &custodian,
+            &farmer,
+            &String::from_str(&env, "SESAME"),
+            &String::from_str(&env, "Grade A"),
+            &7u32,
+            &90u32,
+            &String::from_str(&env, "warehouse-1"),
+        );
+
+        let (child_a, child_b) = client.split(&token_id, &250);
+        let meta_a = client.get_token_metadata(&child_a);
+        let meta_b = client.get_token_metadata(&child_b);
+
+        assert_eq!(
+            meta_a.total_weight_kg + meta_b.total_weight_kg,
+            630
+        );
     }
 }

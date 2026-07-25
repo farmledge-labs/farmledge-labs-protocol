@@ -115,6 +115,22 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "AllTokens"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "string": "SN-1970-000001"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Custodian"
                             },
                             {
@@ -213,6 +229,12 @@
                               "val": {
                                 "bool": false
                               }
+                            },
+                            {
+                              "key": {
+                                "symbol": "parent_token_id"
+                              },
+                              "val": "void"
                             },
                             {
                               "key": {
