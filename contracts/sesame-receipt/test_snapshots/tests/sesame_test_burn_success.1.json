@@ -138,6 +138,22 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "AllTokens"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "string": "SN-1970-000001"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Custodian"
                             },
                             {
