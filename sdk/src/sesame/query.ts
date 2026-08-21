@@ -61,7 +61,7 @@ export async function queryToken(
 
   const contract = new Contract(sesameContractId)
 
-  const builtTx = new TransactionBuilder(fakeAccount as Parameters<typeof TransactionBuilder>[0], {
+  const builtTx = new TransactionBuilder(fakeAccount as ConstructorParameters<typeof TransactionBuilder>[0], {
     fee: BASE_FEE,
     networkPassphrase,
   })
@@ -142,7 +142,7 @@ export async function queryOwner(
 
   const contract = new Contract(sesameContractId)
 
-  const builtTx = new TransactionBuilder(fakeAccount as Parameters<typeof TransactionBuilder>[0], {
+  const builtTx = new TransactionBuilder(fakeAccount as ConstructorParameters<typeof TransactionBuilder>[0], {
     fee: BASE_FEE,
     networkPassphrase,
   })
