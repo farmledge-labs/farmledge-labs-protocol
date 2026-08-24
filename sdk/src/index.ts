@@ -11,6 +11,11 @@ export {
 } from './maize/custodians';
 export { mint as maizeMint } from './maize/mint';
 export type { MintResult as MaizeMintResult } from './maize/mint';
+export {
+  queryToken as maizeQueryToken,
+  queryOwner as maizeQueryOwner,
+} from './maize/query';
+export type { MaizeTokenMetadata } from './maize/query';
 
 // Sesame bindings
 export { init as sesameInit } from './sesame/init';
