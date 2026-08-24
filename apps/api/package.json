@@ -12,7 +12,8 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@farmledge/protocol-sdk": "file:../../sdk"
+    "@farmledge/protocol-sdk": "file:../../sdk",
+    "@stellar/stellar-sdk": "12.3.0"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
