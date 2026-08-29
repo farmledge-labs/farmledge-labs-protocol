@@ -489,9 +489,7 @@ impl SesameReceiptContract {
         env.storage()
             .instance()
             .remove(&DataKey::TokenMeta(token_id.clone()));
-        env.storage()
-            .instance()
-            .remove(&DataKey::Owner(token_id));
+        env.storage().instance().remove(&DataKey::Owner(token_id));
 
         // Update AllTokens list: append children
         let mut all_tokens: Vec<String> = env
@@ -1301,9 +1299,6 @@ mod tests {
         let meta_a = client.get_token_metadata(&child_a);
         let meta_b = client.get_token_metadata(&child_b);
 
-        assert_eq!(
-            meta_a.total_weight_kg + meta_b.total_weight_kg,
-            630
-        );
+        assert_eq!(meta_a.total_weight_kg + meta_b.total_weight_kg, 630);
     }
 }
