@@ -134,6 +134,7 @@ impl SesameReceiptContract {
     // Mint
     // -----------------------------------------------------------------------
 
+    #[allow(clippy::too_many_arguments)]
     pub fn mint(
         env: Env,
         custodian: Address,
