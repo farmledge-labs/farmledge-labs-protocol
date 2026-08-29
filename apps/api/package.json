@@ -13,11 +13,13 @@
   },
   "dependencies": {
     "@farmledge/protocol-sdk": "file:../../sdk",
-    "@stellar/stellar-base": "12.1.1"
+    "@stellar/stellar-base": "12.1.1",
+    "node-cron": "3.0.3"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^20.0.0",
+    "@types/node-cron": "3.0.11",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.11",
     "typescript": "^5.4.0"
