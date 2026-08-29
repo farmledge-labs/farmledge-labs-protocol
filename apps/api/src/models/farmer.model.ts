@@ -10,6 +10,9 @@ export interface Farmer {
   /** Unique farmer identifier (e.g. UUID). */
   id: string
 
+  /** Normalized phone number used as the farmer's login identifier. */
+  phone?: string
+
   /** Stellar public key (G…) — safe to store and log. */
   publicKey: string
 
@@ -22,4 +25,7 @@ export interface Farmer {
    * See farmerWalletSigner.service.ts for encrypt/decrypt helpers.
    */
   encryptedPrivateKey: string
+
+  /** One-way hash of the farmer's PIN, when authentication is configured. */
+  pinHash?: string
 }
