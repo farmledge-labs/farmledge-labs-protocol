@@ -1812,8 +1812,16 @@ mod tests {
         let transfer_result = client.try_transfer(&token_id, &farmer, &receiver);
         assert_eq!(transfer_result, Err(Ok(ContractError::TokenLocked)));
 
-        // Step 6: Unlock token (burn rejects locked tokens)
+        // Step 6: Unlock the token before burning (lock prevents burn)
         client.unlock(&admin, &token_id);
+
+        let meta_unlocked: TokenMetadata = env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::TokenMeta(token_id.clone()))
+                .unwrap()
+        });
+        assert!(!meta_unlocked.is_locked);
 
         // Step 7: Burn the token
         client.burn(&custodian, &token_id);
