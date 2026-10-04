@@ -1739,7 +1739,7 @@ mod tests {
                 .unwrap()
         });
         assert_eq!(meta.bag_count, 10u32);
-        assert_eq!(meta.is_locked, false);
+        assert!(!meta.is_locked);
 
         // Step 4: Transfer token to new owner
         let new_owner = Address::generate(&env);
