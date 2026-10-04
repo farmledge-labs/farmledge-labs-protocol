@@ -160,6 +160,7 @@ impl MaizeReceiptContract {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn mint(
         env: Env,
         custodian: Address,
@@ -1811,7 +1812,10 @@ mod tests {
         let transfer_result = client.try_transfer(&token_id, &farmer, &receiver);
         assert_eq!(transfer_result, Err(Ok(ContractError::TokenLocked)));
 
-        // Step 6: Burn the token
+        // Step 6: Unlock token (burn rejects locked tokens)
+        client.unlock(&admin, &token_id);
+
+        // Step 7: Burn the token
         client.burn(&custodian, &token_id);
 
         let meta_exists = env.as_contract(&contract_id, || {
