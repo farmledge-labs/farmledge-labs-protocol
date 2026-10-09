@@ -1,5 +1,12 @@
 export { FarmledgeClient } from './client'
-export { FarmledgeSDKError } from './errors';
+export {
+  FarmledgeSDKError,
+  TokenNotFoundError,
+  TokenLockedError,
+  InvalidWeightError,
+  InvalidAmountError,
+  ContractInvocationError,
+} from './errors';
 export type { FarmledgeSDKErrorCode } from './errors';
 export { generateCertificatePdf } from './lib/pdf/certificate';
 
@@ -11,6 +18,11 @@ export {
 } from './maize/custodians';
 export { mint as maizeMint } from './maize/mint';
 export type { MintResult as MaizeMintResult } from './maize/mint';
+export { splitToken as maizeSplitToken } from './maize/split';
+export type {
+  SplitTokenParams as MaizeSplitTokenParams,
+  SplitTokenResult as MaizeSplitTokenResult,
+} from './maize/split';
 
 // Sesame bindings
 export { init as sesameInit } from './sesame/init';
