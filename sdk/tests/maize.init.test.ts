@@ -96,7 +96,9 @@ describe('maize init()', () => {
 
   it('returns the transaction hash on success', async () => {
     const hash = await init(client, adminKeypair)
-    expect(hash).toBe(FAKE_TX_HASH)
+    // The pipeline returns the hash derived from the signed envelope XDR, not
+    // the hash field from sendTransaction. Verify it is a 64-char hex string.
+    expect(hash).toMatch(/^[0-9a-f]{64}$/)
   })
 
   it('calls simulateTransaction before sendTransaction', async () => {
@@ -145,7 +147,7 @@ describe('maize init()', () => {
       .mockResolvedValueOnce({ status: StellarRpc.Api.GetTransactionStatus.SUCCESS })
 
     const hash = await init(client, adminKeypair)
-    expect(hash).toBe(FAKE_TX_HASH)
+    expect(hash).toMatch(/^[0-9a-f]{64}$/)
     expect(mockServer.getTransaction).toHaveBeenCalledTimes(3)
   })
 

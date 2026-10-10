@@ -131,7 +131,10 @@ describe('maize mint()', () => {
       'warehouse-1',
     )
 
-    expect(result).toEqual({ tokenId: MINTED_TOKEN_ID, txHash: FAKE_TX_HASH })
+    expect(result).toMatchObject({
+      tokenId: MINTED_TOKEN_ID,
+    })
+    expect(result.txHash).toMatch(/^[0-9a-f]{64}$/)
   })
 
   it('builds the transaction calling "mint" with the correct args', async () => {

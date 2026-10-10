@@ -3,13 +3,14 @@ import {
   Contract,
   Keypair,
   Address,
-  rpc,
   nativeToScVal,
   scValToNative,
   BASE_FEE,
 } from '@stellar/stellar-sdk'
 import type { FarmledgeClient } from '../client'
 import { FarmledgeSDKError } from '../errors'
+import { executeTransaction } from '../tx/pipeline'
+import { keypairSigner } from '../tx/signer'
 
 /**
  * The result of a successful mint: the freshly-minted token id (contract return
@@ -54,130 +55,57 @@ export async function mint(
   weightPerBagKg: number,
   warehouseId: string,
 ): Promise<MintResult> {
-  const { server, networkPassphrase, maizeContractId } = client
+  const { networkPassphrase, maizeContractId } = client
 
-  // 1. Fetch the custodian account's current sequence number from the RPC
-  const account = await server.getAccount(custodian.publicKey())
+  const result = await executeTransaction({
+    client,
+    sourcePublicKey: custodian.publicKey(),
+    buildOp: (account) => {
+      const contract = new Contract(maizeContractId)
+      const custodianAddress = Address.fromString(custodian.publicKey())
+      const farmer = Address.fromString(farmerWallet)
 
-  // 2. Build the invoke-host-function operation that calls
-  //    mint(custodian, farmer_wallet, commodity, grade, bag_count,
-  //         weight_per_bag_kg, warehouse_id)
-  const contract = new Contract(maizeContractId)
-  const custodianAddress = Address.fromString(custodian.publicKey())
-  const farmer = Address.fromString(farmerWallet)
-
-  const builtTx = new TransactionBuilder(account, {
-    fee: BASE_FEE,
-    networkPassphrase,
+      return new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase,
+      })
+        .addOperation(
+          contract.call(
+            'mint',
+            custodianAddress.toScVal(),
+            farmer.toScVal(),
+            nativeToScVal(commodity, { type: 'string' }),
+            nativeToScVal(grade, { type: 'string' }),
+            nativeToScVal(bagCount, { type: 'u32' }),
+            nativeToScVal(weightPerBagKg, { type: 'u32' }),
+            nativeToScVal(warehouseId, { type: 'string' }),
+          ),
+        )
+        .setTimeout(30)
+        .build()
+    },
+    signer: keypairSigner(custodian),
   })
-    .addOperation(
-      contract.call(
-        'mint',
-        custodianAddress.toScVal(),
-        farmer.toScVal(),
-        nativeToScVal(commodity, { type: 'string' }),
-        nativeToScVal(grade, { type: 'string' }),
-        nativeToScVal(bagCount, { type: 'u32' }),
-        nativeToScVal(weightPerBagKg, { type: 'u32' }),
-        nativeToScVal(warehouseId, { type: 'string' }),
-      ),
-    )
-    .setTimeout(30)
-    .build()
 
-  // 3. Simulate the transaction to obtain the Soroban resource footprint, then
-  //    assemble the final transaction (sets the Soroban data extension).
-  //    Contract validation (unauthorized custodian, invalid commodity, zero
-  //    weight) surfaces here as a simulation error.
-  const simResult = await server.simulateTransaction(builtTx)
+  const txHash = result.txHash
 
-  if (rpc.Api.isSimulationError(simResult)) {
-    throw new FarmledgeSDKError(
-      'SIMULATION_FAILED',
-      `Contract rejected mint during simulation: ${simResult.error}`,
-      simResult,
-    )
-  }
-
-  const preparedTx = rpc.assembleTransaction(builtTx, simResult).build()
-
-  // 4. Sign the prepared transaction with the custodian's key
-  preparedTx.sign(custodian)
-
-  // 5. Submit to the network
-  const sendResult = await server.sendTransaction(preparedTx)
-
-  if (sendResult.status === 'ERROR') {
-    throw new FarmledgeSDKError(
-      'SUBMISSION_FAILED',
-      `Transaction submission failed: ${JSON.stringify(sendResult.errorResult)}`,
-      sendResult,
-    )
-  }
-
-  const txHash = sendResult.hash
-
-  // 6. Poll until the transaction reaches a terminal state (SUCCESS or FAILED)
-  const POLL_INTERVAL_MS = 1_000
-  const MAX_ATTEMPTS = 30
-
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    await sleep(POLL_INTERVAL_MS)
-
-    const statusResult = await server.getTransaction(txHash)
-
-    if (statusResult.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-      return { tokenId: decodeTokenId(statusResult, txHash), txHash }
-    }
-
-    if (statusResult.status === rpc.Api.GetTransactionStatus.FAILED) {
-      throw new FarmledgeSDKError(
-        'TRANSACTION_FAILED',
-        `Transaction ${txHash} failed on-chain`,
-        statusResult,
-      )
-    }
-
-    // NOT_FOUND means the transaction is still pending — keep polling
-  }
-
-  throw new FarmledgeSDKError(
-    'CONFIRMATION_TIMEOUT',
-    `Transaction ${txHash} did not confirm within ${MAX_ATTEMPTS} seconds`,
-  )
-}
-
-/**
- * Decodes the `String` token id returned by the contract's `mint()` from the
- * successful transaction's return value.
- */
-function decodeTokenId(
-  statusResult: rpc.Api.GetSuccessfulTransactionResponse,
-  txHash: string,
-): string {
-  const returnValue = statusResult.returnValue
-
-  if (!returnValue) {
+  if (!result.returnValue) {
     throw new FarmledgeSDKError(
       'MALFORMED_RESULT',
       `Transaction ${txHash} succeeded but returned no token id`,
-      statusResult,
+      result,
     )
   }
 
-  const tokenId = scValToNative(returnValue)
+  const tokenId = scValToNative(result.returnValue)
 
   if (typeof tokenId !== 'string') {
     throw new FarmledgeSDKError(
       'MALFORMED_RESULT',
       `Transaction ${txHash} returned a non-string token id`,
-      returnValue,
+      result.returnValue,
     )
   }
 
-  return tokenId
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return { tokenId, txHash }
 }

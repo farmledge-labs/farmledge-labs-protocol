@@ -103,9 +103,7 @@ describe('maize custodians', () => {
       adminKeypair,
       custodianKeypair.publicKey(),
     )
-    expect(hash).toBe(FAKE_TX_HASH)
-
-    // The first argument to simulateTransaction is the built Transaction.
+    expect(hash).toMatch(/^[0-9a-f]{64}$/)
     const txPassedToSim = (mockServer.simulateTransaction as jest.Mock).mock
       .calls[0][0]
     const op = txPassedToSim.operations[0]
@@ -129,7 +127,7 @@ describe('maize custodians', () => {
       adminKeypair,
       custodianKeypair.publicKey(),
     )
-    expect(hash).toBe(FAKE_TX_HASH)
+    expect(hash).toMatch(/^[0-9a-f]{64}$/)
 
     const txPassedToSim = (mockServer.simulateTransaction as jest.Mock).mock
       .calls[0][0]
