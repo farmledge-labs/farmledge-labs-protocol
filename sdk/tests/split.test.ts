@@ -129,12 +129,12 @@ describe('maize splitToken()', () => {
       signer: signerKeypair,
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       parentTokenId: PARENT_TOKEN_ID,
       childA: { tokenId: CHILD_A_TOKEN_ID },
       childB: { tokenId: CHILD_B_TOKEN_ID },
-      txHash: FAKE_TX_HASH,
     })
+    expect(result.txHash).toMatch(/^[0-9a-f]{64}$/)
   })
 
   it('builds the transaction calling "split" with the correct args', async () => {

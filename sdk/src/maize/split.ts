@@ -2,7 +2,6 @@ import {
   TransactionBuilder,
   Contract,
   Keypair,
-  rpc,
   nativeToScVal,
   scValToNative,
   BASE_FEE,
@@ -15,7 +14,10 @@ import {
   TokenLockedError,
   TokenNotFoundError,
   ContractInvocationError,
+  TerminalError,
 } from '../errors'
+import { executeTransaction } from '../tx/pipeline'
+import { keypairSigner } from '../tx/signer'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -58,25 +60,8 @@ export interface SplitTokenResult {
 /**
  * Parses the `(String, String)` tuple returned by the contract's `split()`
  * and extracts the two child token ids.
- *
- * The Soroban SDK encodes a Rust `(A, B)` as a `ScVec` (struct/map representation
- * when using `contracttype`, or simply a `Vec` for tuples). `scValToNative`
- * converts it to a JS array `[childAId, childBId]`.
  */
-function decodeSplitResult(
-  statusResult: rpc.Api.GetSuccessfulTransactionResponse,
-  txHash: string,
-): [string, string] {
-  const returnValue = statusResult.returnValue
-
-  if (!returnValue) {
-    throw new FarmledgeSDKError(
-      'MALFORMED_RESULT',
-      `Transaction ${txHash} succeeded but returned no split result`,
-      statusResult,
-    )
-  }
-
+function decodeSplitResult(returnValue: import('@stellar/stellar-sdk').xdr.ScVal, txHash: string): [string, string] {
   const decoded = scValToNative(returnValue)
 
   if (
@@ -98,8 +83,6 @@ function decodeSplitResult(
 /**
  * Extracts the numeric ContractError discriminant from a simulation-error
  * string such as `"HostError: Error(Contract, #3)"`.
- *
- * Returns `null` when the string does not match the expected format.
  */
 function parseContractErrorCode(errorString: string): number | null {
   const match = errorString.match(/Error\(Contract,\s*#(\d+)\)/)
@@ -108,14 +91,13 @@ function parseContractErrorCode(errorString: string): number | null {
 }
 
 /**
- * Maps a known ContractError discriminant to a typed error for `split()`.
- * Unknown codes produce a {@link ContractInvocationError}.
+ * Maps a known ContractError discriminant to a typed TerminalError for split().
  */
 function mapContractError(
   code: number,
   tokenId: string,
   cause: unknown,
-): FarmledgeSDKError {
+): TerminalError {
   switch (code) {
     case TokenNotFoundError.CONTRACT_CODE:
       return new TokenNotFoundError(tokenId, cause)
@@ -153,19 +135,19 @@ function mapContractError(
  * @param params  - {@link SplitTokenParams}
  * @returns A {@link SplitTokenResult} containing both child token ids and the txHash
  *
- * @throws {InvalidAmountError} When `amountKg` is out of range before any RPC call
- * @throws {TokenNotFoundError} When the parent token does not exist
- * @throws {TokenLockedError} When the parent token is locked
- * @throws {InvalidWeightError} When the contract rejects the split weight
+ * @throws {InvalidAmountError}      When `amountKg` is out of range (no RPC call made)
+ * @throws {TokenNotFoundError}      When the parent token does not exist
+ * @throws {TokenLockedError}        When the parent token is locked
+ * @throws {InvalidWeightError}      When the contract rejects the split weight
  * @throws {ContractInvocationError} When the contract returns an unexpected error code
- * @throws {FarmledgeSDKError} For simulation, submission, or confirmation failures
+ * @throws {FarmledgeSDKError}       For simulation, submission, or confirmation failures
  */
 export async function splitToken(
   client: FarmledgeClient,
   params: SplitTokenParams,
 ): Promise<SplitTokenResult> {
   const { tokenId, amountKg, signer } = params
-  const { server, networkPassphrase, maizeContractId } = client
+  const { networkPassphrase, maizeContractId } = client
 
   // ------------------------------------------------------------------
   // Client-side validation — reject before touching the network
@@ -182,104 +164,68 @@ export async function splitToken(
   }
 
   // ------------------------------------------------------------------
-  // 1. Fetch the signer account's current sequence number from the RPC
+  // Execute through the pipeline
   // ------------------------------------------------------------------
-  const account = await server.getAccount(signer.publicKey())
+  let result: import('../tx/pipeline').TransactionResult
 
-  // ------------------------------------------------------------------
-  // 2. Build the invoke-host-function operation that calls
-  //    split(token_id, amount_kg)
-  // ------------------------------------------------------------------
-  const contract = new Contract(maizeContractId)
+  try {
+    result = await executeTransaction({
+      client,
+      sourcePublicKey: signer.publicKey(),
+      buildOp: (account) => {
+        const contract = new Contract(maizeContractId)
 
-  const builtTx = new TransactionBuilder(account, {
-    fee: BASE_FEE,
-    networkPassphrase,
-  })
-    .addOperation(
-      contract.call(
-        'split',
-        nativeToScVal(tokenId, { type: 'string' }),
-        nativeToScVal(amountKg, { type: 'u32' }),
-      ),
-    )
-    .setTimeout(30)
-    .build()
-
-  // ------------------------------------------------------------------
-  // 3. Simulate — surfaces contract rejections (TokenNotFound, TokenLocked,
-  //    InvalidWeight) before spending any sequence number.
-  // ------------------------------------------------------------------
-  const simResult = await server.simulateTransaction(builtTx)
-
-  if (rpc.Api.isSimulationError(simResult)) {
-    const code = parseContractErrorCode(simResult.error)
-    if (code !== null) {
-      throw mapContractError(code, tokenId, simResult)
-    }
-    throw new FarmledgeSDKError(
-      'SIMULATION_FAILED',
-      `Contract rejected split during simulation: ${simResult.error}`,
-      simResult,
-    )
-  }
-
-  // ------------------------------------------------------------------
-  // 4. Assemble (sets the Soroban resource footprint) → sign → submit
-  // ------------------------------------------------------------------
-  const preparedTx = rpc.assembleTransaction(builtTx, simResult).build()
-  preparedTx.sign(signer)
-
-  const sendResult = await server.sendTransaction(preparedTx)
-
-  if (sendResult.status === 'ERROR') {
-    throw new FarmledgeSDKError(
-      'SUBMISSION_FAILED',
-      `Transaction submission failed: ${JSON.stringify(sendResult.errorResult)}`,
-      sendResult,
-    )
-  }
-
-  const txHash = sendResult.hash
-
-  // ------------------------------------------------------------------
-  // 5. Poll until the transaction reaches a terminal state
-  // ------------------------------------------------------------------
-  const POLL_INTERVAL_MS = 1_000
-  const MAX_ATTEMPTS = 30
-
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    await sleep(POLL_INTERVAL_MS)
-
-    const statusResult = await server.getTransaction(txHash)
-
-    if (statusResult.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-      const [childAId, childBId] = decodeSplitResult(statusResult, txHash)
-      return {
-        parentTokenId: tokenId,
-        childA: { tokenId: childAId },
-        childB: { tokenId: childBId },
-        txHash,
+        return new TransactionBuilder(account, {
+          fee: BASE_FEE,
+          networkPassphrase,
+        })
+          .addOperation(
+            contract.call(
+              'split',
+              nativeToScVal(tokenId, { type: 'string' }),
+              nativeToScVal(amountKg, { type: 'u32' }),
+            ),
+          )
+          .setTimeout(30)
+          .build()
+      },
+      signer: keypairSigner(signer),
+    })
+  } catch (err) {
+    // Map contract error codes from simulation failures to typed errors
+    if (
+      err instanceof TerminalError &&
+      err.code === 'SIMULATION_FAILED' &&
+      err.cause &&
+      typeof (err.cause as { error?: string }).error === 'string'
+    ) {
+      const code = parseContractErrorCode(
+        (err.cause as { error: string }).error,
+      )
+      if (code !== null) {
+        throw mapContractError(code, tokenId, err.cause)
       }
     }
-
-    if (statusResult.status === rpc.Api.GetTransactionStatus.FAILED) {
-      throw new FarmledgeSDKError(
-        'TRANSACTION_FAILED',
-        `Transaction ${txHash} failed on-chain`,
-        statusResult,
-      )
-    }
-
-    // NOT_FOUND means the transaction is still pending — keep polling
+    throw err
   }
 
-  throw new FarmledgeSDKError(
-    'CONFIRMATION_TIMEOUT',
-    `Transaction ${txHash} did not confirm within ${MAX_ATTEMPTS} seconds`,
-  )
-}
+  // ------------------------------------------------------------------
+  // Decode the (child_a_id, child_b_id) tuple from the return value
+  // ------------------------------------------------------------------
+  if (!result.returnValue) {
+    throw new FarmledgeSDKError(
+      'MALFORMED_RESULT',
+      `Transaction ${result.txHash} succeeded but returned no split result`,
+      result,
+    )
+  }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  const [childAId, childBId] = decodeSplitResult(result.returnValue, result.txHash)
+
+  return {
+    parentTokenId: tokenId,
+    childA: { tokenId: childAId },
+    childB: { tokenId: childBId },
+    txHash: result.txHash,
+  }
 }
