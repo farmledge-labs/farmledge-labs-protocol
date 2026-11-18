@@ -2,5 +2,5 @@
 node_modules
 dist
 *.wasm
-.env
 .stellar
+config.bat
