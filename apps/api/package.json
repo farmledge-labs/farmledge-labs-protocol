@@ -4,7 +4,7 @@
   "private": true,
   "description": "Farmledge platform API",
   "scripts": {
-    "build": "node init && tsc",
+    "build": "tsc",
     "test": "jest",
     "typecheck": "tsc --noEmit"
   },
